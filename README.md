@@ -1,5 +1,3 @@
-# 🤖 Bot Atendente Automático para WhatsApp
-
 Olá, pessoal! Sou o Gabriel do 3º ano C e apresento meu projeto: um atendente automático para WhatsApp que nunca dorme, não erra pedidos e ainda lembra dos clientes!
 
 🚀 **Ele responde em média 7 segundos e tem aquele charme que só a IA consegue.**
@@ -52,18 +50,43 @@ Bot: Sua pizza de calabresa ficará pronta em 25 minutos! Quer adicionar uma Coc
 
 ---
 
-## 📌 Próximas Melhorias
+# Para rodar o bot no seu ambiente local, siga os passos abaixo:
 
-- [ ] Integração com links de pagamento direto no chat;
-- [ ] Reconhecimento de emojis e memes;
-- [ ] Dashboard para acompanhamento das conversas.
+## 1. **Instale as dependências necessárias:**
+   ```sh
+   npm install venom-bot axios dotenv
+   ```
+   
+# 🔑 Gerando uma Nova Chave de API para o Bot
 
----
+Para que o bot funcione corretamente, é necessário obter uma chave de API da plataforma OpenRouter. Siga os passos abaixo para gerar a sua.
 
-## 📢 Conclusão
+## 🚀 Passos para Criar uma Nova Chave de API
 
-Esse projeto começou como um trabalho escolar, mas se tornou uma ferramenta **real** para ajudar pequenos negócios.
+1. **Crie uma conta no OpenRouter:**
+   - Acesse [OpenRouter.ai](https://openrouter.ai/)
+   - Clique em **Sign Up** e siga o processo de registro.
 
-Se fosse implementar numa loja **de verdade**, qual funcionalidade você testaria primeiro? 😎
+2. **Pesquise pelo modelo DeepSeek V3 (Free):**
+   - Após fazer login, vá até a aba **Search Models**
+   - Pesquise por **DeepSeek V3 (Free)** e selecione-o
 
-💬 **Quer ver o bot em ação? Me chama!**
+3. **Gerar a Chave de API:**
+   - No menu inferior, clique em **API**
+   - Clique no botão para **Criar Nova Chave de API**
+   - Copie a chave gerada
+
+4. **Substitua a chave no código:**
+   - Abra o arquivo do bot e localize a linha:
+     ```js
+     const OPENROUTER_API_KEY = '';
+     ```
+   - Substitua as aspas vazias pela sua nova chave de API:
+     ```js
+     const OPENROUTER_API_KEY = 'SUA_CHAVE_AQUI';
+     ```
+
+5. **Salve as alterações e execute o bot!** 🚀
+
+   ```sh
+   node app.js
