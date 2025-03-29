@@ -2,7 +2,7 @@ const venom = require('venom-bot');
 const axios = require('axios');
 const { cadastrarCliente, buscarCliente, atualizarHistorico, buscarHistorico } = require('./db');
 
-const OPENROUTER_API_KEY = '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';
+const OPENROUTER_API_KEY = ''; //Chave API
 const MODEL_NAME = 'deepseek/deepseek-chat';
 
 const treinamento = `
