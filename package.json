@@ -6,7 +6,7 @@
       "venom-bot": "^5.3.0"
     },
     "name": "zappy",
-    "main": "app.js",
+    "main": "",
     "scripts": {
       "start": "node app.js"
     },
