@@ -8,7 +8,7 @@
     "name": "zappy",
     "main": "",
     "scripts": {
-      "start": "node app.js"
+      "start": ""
     },
     "author": "gaab",
     "description": "Girando em torno das suas necessidades"
