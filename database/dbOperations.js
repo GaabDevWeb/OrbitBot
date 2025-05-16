@@ -12,3 +12,12 @@ const readClientes = () => {
         return [];
     }
 };
+
+const readHistorico = () => {
+    try {
+        return JSON.parse(fs.readFileSync(historicoPath, 'utf-8')) || [];
+    } catch (err) {
+        console.error('Erro ao ler histórico:', err);
+        return [];
+    }
+};
