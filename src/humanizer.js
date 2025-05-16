@@ -30,3 +30,5 @@ async function simularRespostaHumana(client, chatId, texto) {
         await client.sendText(chatId, mensagemAtual);
     }
 }
+
+module.exports = { simularRespostaHumana };
