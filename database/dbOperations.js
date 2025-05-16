@@ -21,3 +21,19 @@ const readHistorico = () => {
         return [];
     }
 };
+
+const writeClientes = (data) => {
+    try {
+        fs.writeFileSync(clientesPath, JSON.stringify(data, null, 2));
+    } catch (err) {
+        console.error('Erro ao escrever clientes:', err);
+    }
+};
+
+const writeHistorico = (data) => {
+    try {
+        fs.writeFileSync(historicoPath, JSON.stringify(data, null, 2));
+    } catch (err) {
+        console.error('Erro ao escrever histórico:', err);
+    }
+};
