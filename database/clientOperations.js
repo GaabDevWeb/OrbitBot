@@ -11,3 +11,8 @@ const cadastrarCliente = (numero) => {
     writeClientes(clientes);
     return novoCliente;
 };
+
+const buscarCliente = (numero) => {
+    const clientes = readClientes();
+    return clientes.find(cliente => cliente.numero === numero);
+};
