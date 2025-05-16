@@ -1,1 +1,1 @@
-const {cadastrarCliente, buscacarClinte } = require ('./clinteOperations');
+const { cadastrarCliente, buscarCliente } = require('./clientOperations');
