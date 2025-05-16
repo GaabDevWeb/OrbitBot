@@ -37,3 +37,5 @@ const writeHistorico = (data) => {
         console.error('Erro ao escrever histórico:', err);
     }
 };
+
+module.exports = { readClientes, readHistorico, writeClientes, writeHistorico };
