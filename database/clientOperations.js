@@ -16,3 +16,5 @@ const buscarCliente = (numero) => {
     const clientes = readClientes();
     return clientes.find(cliente => cliente.numero === numero);
 };
+
+module.exports = { cadastrarCliente, buscarCliente };
