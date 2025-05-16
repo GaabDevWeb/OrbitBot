@@ -3,4 +3,7 @@ const { atualizarHistorico, buscarHistorico } = require('./historyOperations');
 
 module.exports = {
     cadastrarCliente,
+    buscarCliente,
+    atualizarHistorico,
+    buscarHistorico
 };
