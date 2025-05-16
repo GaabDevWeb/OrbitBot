@@ -10,3 +10,8 @@ const atualizarHistorico = (cliente_id, mensagem, role) => {
     });
     writeHistorico(historico);
 };
+
+const buscarHistorico = (cliente_id) => {
+    const historico = readHistorico();
+    return historico.filter(item => item.cliente_id === cliente_id);
+};
