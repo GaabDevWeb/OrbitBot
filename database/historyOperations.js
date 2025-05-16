@@ -15,3 +15,5 @@ const buscarHistorico = (cliente_id) => {
     const historico = readHistorico();
     return historico.filter(item => item.cliente_id === cliente_id);
 };
+
+module.exports = { atualizarHistorico, buscarHistorico };
