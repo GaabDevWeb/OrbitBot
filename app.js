@@ -1,0 +1,1 @@
+const {cadastrarCliente, buscacarClinte } = require ('./clinteOperations');
