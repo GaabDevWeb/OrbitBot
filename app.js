@@ -1,9 +1,3 @@
-const { cadastrarCliente, buscarCliente } = require('./clientOperations');
-const { atualizarHistorico, buscarHistorico } = require('./historyOperations');
+const { startBot } = require('./src/bot');
 
-module.exports = {
-    cadastrarCliente,
-    buscarCliente,
-    atualizarHistorico,
-    buscarHistorico
-};
+startBot();
