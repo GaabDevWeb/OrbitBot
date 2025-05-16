@@ -52,3 +52,5 @@ function startBot() {
         console.error('Erro ao criar o bot:', err);
     });
 }
+
+module.exports = { startBot };
