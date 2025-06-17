@@ -1,9 +1,9 @@
-const { cadastrarCliente, buscarCliente } = require('./clientOperations');
-const { atualizarHistorico, buscarHistorico } = require('./historyOperations');
+const dbOperations = require('./db');
 
 module.exports = {
-    cadastrarCliente,
-    buscarCliente,
-    atualizarHistorico,
-    buscarHistorico
+    cadastrarCliente: dbOperations.cadastrarCliente,
+    buscarCliente: dbOperations.buscarCliente,
+    atualizarHistorico: dbOperations.adicionarMensagem,
+    buscarHistorico: dbOperations.buscarHistorico,
+    buscarUltimasMensagens: dbOperations.buscarUltimasMensagens
 };
