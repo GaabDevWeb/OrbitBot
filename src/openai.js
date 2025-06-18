@@ -2,7 +2,7 @@ const axios = require('axios');
 const { treinamento } = require('./treinamento');
 const logger = require('./logger');
 
-const OPENROUTER_API_KEY = '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';
+const OPENROUTER_API_KEY = '';
 const MODEL_NAME = 'deepseek/deepseek-chat';
 const MAX_RETRIES = 3;
 const INITIAL_TIMEOUT = 5000; // Reduzido para 5 segundos
@@ -27,7 +27,6 @@ async function sleep(ms) {
 }
 
 function generateCacheKey(historico, userMessage) {
-    // Simplifica a chave do cache para melhor performance
     return `${userMessage}-${historico.length}`;
 }
 
