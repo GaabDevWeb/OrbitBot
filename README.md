@@ -4,13 +4,13 @@
 
 Um bot de WhatsApp inteligente, robusto e otimizado, que utiliza IA para responder mensagens de forma natural, rápida e personalizada. Agora com sistema de backup avançado, banco de dados SQLite, monitoramento em tempo real e diversas otimizações de performance.
 
-## 📋 Pré-requisitos
+## Pré-requisitos
 
 - [Node.js](https://nodejs.org/) (versão 16 ou superior)
 - NPM ou Yarn
 - Conta no [OpenRouter](https://openrouter.ai) para acessar a API de IA
 
-## 🚀 Instalação
+## Instalação
 
 1. Clone este repositório:
 
@@ -30,61 +30,37 @@ npm install
 const OPENROUTER_API_KEY = 'sua-chave-aqui';
 ```
 
-## 🔑 Como Obter sua Chave de API no OpenRouter
+## Funcionalidades Principais
 
-1. Crie uma conta no [OpenRouter](https://openrouter.ai)
-2. Clique em **Sign Up** e conclua o cadastro
-3. Encontre o modelo **DeepSeek V3 (Free)**
-   - Após o login, vá para a aba **Search Models**
-   - Procure por **DeepSeek V3 (Free)** e selecione o modelo
-4. Gere sua chave de API
-   - Clique em **API** no menu inferior
-   - Clique em **Create API Key**
-   - Copie a chave gerada
-5. Adicione a chave ao projeto
-   - No arquivo `src/openai.js`, substitua:
-
-```javascript
-const OPENROUTER_API_KEY = '';
-```
-
-   - por:
-
-```javascript
-const OPENROUTER_API_KEY = 'SUA_CHAVE_AQUI';
-```
-
-## ⚙️ Funcionalidades Principais
-
-- 🤖 **Respostas inteligentes com IA** (DeepSeek Chat via OpenRouter)
-- 🧑‍💻 **Simulação de digitação humana otimizada** (respostas mais naturais e rápidas)
-- 🗂️ **Histórico de conversas por cliente** (limite de 50 mensagens, paginação, busca eficiente)
-- 🧠 **Personalização de respostas baseada no contexto da conversa**
-- 💾 **Sistema de backup avançado**
+- **Respostas inteligentes com IA** (DeepSeek Chat via OpenRouter)
+- **Simulação de digitação humana otimizada** (respostas mais naturais e rápidas)
+- **Histórico de conversas por cliente** (limite de 50 mensagens, paginação, busca eficiente)
+- **Personalização de respostas baseada no contexto da conversa**
+- **Sistema de backup avançado**
   - Backup automático a cada 6 horas (mantém últimos 5)
   - Backup manual com nome personalizado
   - Restauração de backups
   - Limpeza automática
   - Log detalhado de operações
   - Busca flexível (não precisa do nome exato)
-- 📊 **Monitoramento e métricas em tempo real**
+- **Monitoramento e métricas em tempo real**
   - Tempo de resposta
   - Uso de memória
   - CPU Load
   - Total de mensagens
   - Erros
   - Tempo de execução
-- 📨 **Sistema de filas para mensagens** (ordem, estabilidade e performance)
-- 🚀 **Otimizações de performance**
+- **Sistema de filas para mensagens** (ordem, estabilidade e performance)
+- **Otimizações de performance**
   - Cache LRU para respostas da API (TTL 30min, 1000 itens)
   - Cache em memória para banco de dados (TTL 30s)
   - Compressão de mensagens
   - Retry e backoff exponencial para requisições de API
   - Paginação e limitação de histórico
-- 🗄️ **Banco de dados SQLite** (substitui arquivos JSON, mais performance e integridade)
-- 🔒 **Comandos administrativos via WhatsApp** (reset, backup, histórico, etc.)
+- **Banco de dados SQLite** (substitui arquivos JSON, mais performance e integridade)
+- **Comandos administrativos via WhatsApp** (reset, backup, histórico, etc.)
 
-## 🏆 Otimizações e Benefícios
+## Otimizações e Benefícios
 
 - Redução de ~50% no tempo de resposta (média de 1-1.5 segundos)
 - Redução de ~33% no uso de memória (~40MB)
@@ -96,7 +72,7 @@ const OPENROUTER_API_KEY = 'SUA_CHAVE_AQUI';
 - Backup confiável, flexível e fácil de restaurar
 - Logs detalhados e métricas em tempo real para monitoramento
 
-## 🛠️ Comandos Administrativos via WhatsApp
+## Comandos Administrativos via WhatsApp
 
 Todos os comandos abaixo devem ser enviados por um número autorizado (admin):
 
@@ -115,7 +91,7 @@ Todos os comandos abaixo devem ser enviados por um número autorizado (admin):
 - Não é necessário digitar o nome exato do backup, a busca é flexível e ignora maiúsculas/minúsculas.
 - Use `/backup listar` para ver os nomes disponíveis.
 
-## 🏗️ Estrutura do Projeto
+## Estrutura do Projeto
 
 ```
 OrbitBot/
@@ -141,7 +117,7 @@ OrbitBot/
 └── RELATORIO.md              # Relatório detalhado de otimizações
 ```
 
-## 📈 Monitoramento e Métricas
+## Monitoramento e Métricas
 
 O OrbitBot monitora em tempo real:
 - Tempo de execução
@@ -154,14 +130,14 @@ O OrbitBot monitora em tempo real:
 
 Essas métricas são exibidas periodicamente no console e ajudam na identificação rápida de problemas e oportunidades de otimização.
 
-## 📝 Personalização
+## Personalização
 
 Você pode ajustar:
 - O comportamento do bot editando `src/treinamento.js`
 - O tempo de resposta em `src/humanizer.js`
 - O modelo de IA em `src/openai.js`
 
-## 💡 Futuras Melhorias
+## Futuras Melhorias
 
 - Sistema de pedidos e cardápio digital para comércios
 - Rate limiting para evitar spam
