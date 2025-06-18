@@ -9,7 +9,7 @@ const logger = require('./logger');
 const backupManager = require('./backup');
 
 // Lista de administradores autorizados
-const ADMIN_NUMBERS = ['555496921107@c.us'];
+const ADMIN_NUMBERS = [''];
 
 function isAdmin(number) {
     return ADMIN_NUMBERS.includes(number);

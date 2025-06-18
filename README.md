@@ -91,6 +91,23 @@ Todos os comandos abaixo devem ser enviados por um número autorizado (admin):
 - Não é necessário digitar o nome exato do backup, a busca é flexível e ignora maiúsculas/minúsculas.
 - Use `/backup listar` para ver os nomes disponíveis.
 
+## Configuração de Administradores
+
+Para adicionar números de administrador, edite o arquivo `src/bot.js` e localize a constante `ADMIN_NUMBERS`. Adicione os números no formato correto:
+
+```javascript
+const ADMIN_NUMBERS = [
+    '555496921107@c.us',  // Exemplo de número
+    '5511999999999@c.us'  // Adicione mais números conforme necessário
+];
+```
+
+Observações importantes:
+- O número deve incluir o código do país e o sufixo `@c.us`
+- Apenas números listados em `ADMIN_NUMBERS` poderão usar comandos administrativos
+- Recomenda-se manter esta lista atualizada e segura
+- Para adicionar um novo administrador, basta incluir o número no formato correto
+
 ## Estrutura do Projeto
 
 ```
