@@ -2,7 +2,6 @@ const venom = require('venom-bot');
 const { handleMessage } = require('./openai');
 const { simularRespostaHumana } = require('./humanizer');
 const { cadastrarCliente, buscarCliente, atualizarHistorico, buscarHistorico, buscarUltimasMensagens } = require('../database');
-const { resetDatabase } = require('../database/dbOperations');
 const performanceMonitor = require('./performance');
 const messageQueue = require('./queue');
 const logger = require('./logger');

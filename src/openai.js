@@ -2,11 +2,11 @@ const axios = require('axios');
 const { treinamento } = require('./treinamento');
 const logger = require('./logger');
 
-const OPENROUTER_API_KEY = '';
+const OPENROUTER_API_KEY = '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';
 const MODEL_NAME = 'deepseek/deepseek-chat';
 const MAX_RETRIES = 3;
 const INITIAL_TIMEOUT = 5000; // Reduzido para 5 segundos
-const CACHE_TTL = 1800000; // 30 minutos em milissegundos
+const CACHE_TTL = 1800000; // 30 minutos em milissegundos   
 
 // Cache para respostas frequentes com LRU
 const responseCache = new Map();
