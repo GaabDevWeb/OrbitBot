@@ -1,0 +1,43 @@
+# Dependências
+node_modules/
+package-lock.json
+
+# Arquivos de sessão do WhatsApp
+tokens/
+*.session
+# Logs
+logs/
+*.log
+
+# Arquivos temporários
+*.tmp
+*.temp
+
+# Arquivos de áudio temporários
+audios/
+
+# Arquivos de transcrição
+transcricao.txt
+
+# Arquivos de ambiente
+.env
+.env.local
+.env.production
+
+# Arquivos do sistema
+.DS_Store
+Thumbs.db
+
+# Arquivos de IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Arquivos de backup (exceto logs de backup)
+database/backups/*/
+!database/backups/backup_log.json
+
+# Arquivos de cache
+.cache/
+*.cache 

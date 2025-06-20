@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const sqlite3 = require('sqlite3').verbose();
 
 const logger = {
     info: (message, data = {}) => {
@@ -35,40 +36,60 @@ const logger = {
             cpuDiff
         } = data;
 
-        // Lê informações do banco de dados
-        const clientesPath = path.join(__dirname, '../database/data/clientes.json');
-        const historicoPath = path.join(__dirname, '../database/data/historico.json');
+        // Lê informações do banco de dados SQLite
+        const dbPath = path.join(__dirname, '../database/data/orbitbot.db');
         
         let totalClientes = 0;
         let totalMensagens = 0;
-        let clientesData = [];
-        let historicoData = [];
         
-        try {
-            const clientes = JSON.parse(fs.readFileSync(clientesPath, 'utf-8'));
-            const historico = JSON.parse(fs.readFileSync(historicoPath, 'utf-8'));
-            totalClientes = clientes.length;
-            totalMensagens = historico.length;
-            clientesData = clientes;
-            historicoData = historico;
-        } catch (err) {
-            console.error('Erro ao ler dados do banco:', err.message);
-        }
+        const db = new sqlite3.Database(dbPath, (err) => {
+            if (err) {
+                console.error('Erro ao conectar ao banco para métricas:', err.message);
+                return;
+            }
 
-        console.log('\n=== MÉTRICAS DE PERFORMANCE ===');
-        console.log(`Tempo de execução: ${uptime} segundos`);
-        console.log(`Total de mensagens: ${messageCount}`);
-        console.log(`Tempo médio de resposta: ${avgResponseTime}ms`);
-        console.log(`Erros: ${errorCount}`);
-        console.log(`Uso de memória: ${memory.heapUsed}MB (${memoryDiff > 0 ? '+' : ''}${memoryDiff}MB)`);
-        console.log(`CPU Load (1min): ${cpu['1min']} (${cpuDiff > 0 ? '+' : ''}${cpuDiff})`);
-        
-        console.log('\n=== DADOS DO BANCO ===');
-        console.log(`Total de clientes: ${totalClientes}`);
-        console.log(`Total de mensagens no histórico: ${totalMensagens}`);
-        console.log('\n Clientes:', clientesData);
-        console.log('\n Histórico:', historicoData);
-        console.log('==============================\n');
+            db.get(`
+                SELECT 
+                    (SELECT COUNT(*) FROM clientes) as totalClientes,
+                    (SELECT COUNT(*) FROM historico) as totalMensagens
+            `, (err, row) => {
+                db.close();
+                if (err) {
+                    console.error('Erro ao ler dados do banco:', err.message);
+                } else {
+                    totalClientes = row.totalClientes;
+                    totalMensagens = row.totalMensagens;
+                }
+
+                // Busca estatísticas de áudio
+                let audioStats = { totalProcessed: 0, successfulTranscriptions: 0, cacheSize: 0 };
+                try {
+                    const audioProcessor = require('./audioProcessor');
+                    audioStats = audioProcessor.getStats();
+                } catch (err) {
+                    // Ignora erro se o módulo não estiver disponível
+                }
+
+                console.log('\n=== MÉTRICAS DE PERFORMANCE ===');
+                console.log(`Tempo de execução: ${uptime} segundos`);
+                console.log(`Total de mensagens: ${messageCount}`);
+                console.log(`Tempo médio de resposta: ${avgResponseTime}ms`);
+                console.log(`Erros: ${errorCount}`);
+                console.log(`Uso de memória: ${memory.heapUsed}MB (${memoryDiff > 0 ? '+' : ''}${memoryDiff}MB)`);
+                console.log(`CPU Load (1min): ${cpu['1min']} (${cpuDiff > 0 ? '+' : ''}${cpuDiff})`);
+                
+                console.log('\n=== DADOS DO BANCO ===');
+                console.log(`Total de clientes: ${totalClientes}`);
+                console.log(`Total de mensagens no histórico: ${totalMensagens}`);
+                
+                console.log('\n=== SISTEMA DE ÁUDIO ===');
+                console.log(`Áudios processados: ${audioStats.totalProcessed}`);
+                console.log(`Transcrições bem-sucedidas: ${audioStats.successfulTranscriptions}`);
+                console.log(`Taxa de sucesso: ${audioStats.totalProcessed > 0 ? ((audioStats.successfulTranscriptions / audioStats.totalProcessed) * 100).toFixed(1) : 0}%`);
+                console.log(`Cache de transcrições: ${audioStats.cacheSize} itens`);
+                console.log('==============================\n');
+            });
+        });
     },
 
     api: (message, data = {}) => {
