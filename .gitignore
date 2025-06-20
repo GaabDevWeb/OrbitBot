@@ -5,6 +5,7 @@ package-lock.json
 # Arquivos de sessão do WhatsApp
 tokens/
 *.session
+
 # Logs
 logs/
 *.log
