@@ -1,9 +1,10 @@
+require('dotenv').config();
 const axios = require('axios');
 const logger = require('./logger');
 const { aiConfigManager } = require('./aiConfig');
 const { pluginSystem } = require('./pluginSystem');
 
-const OPENROUTER_API_KEY = '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';
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const MAX_RETRIES = 3;
 const INITIAL_TIMEOUT = 5000;
 const CACHE_TTL = 1800000; // 30 minutos
@@ -43,6 +44,11 @@ async function handleMessage(historico, userMessage, userId = null) {
     // Gera configuração baseada no usuário
     const config = aiConfigManager.generateConfig(userId);
     
+    if (!OPENROUTER_API_KEY) {
+        logger.error('OPENROUTER_API_KEY não definida no ambiente (.env)');
+        throw new Error('Configuração inválida: defina OPENROUTER_API_KEY no .env');
+    }
+    
     // Valida configuração
     const validation = aiConfigManager.validateConfig(config);
     if (!validation.isValid) {
@@ -77,9 +83,14 @@ async function handleMessage(historico, userMessage, userId = null) {
     
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
         try {
+            // Permite overrides via ambiente
+            const modelName = process.env.OPENROUTER_MODEL || config.model.name;
+            const temperature = process.env.OPENROUTER_TEMPERATURE ? parseFloat(process.env.OPENROUTER_TEMPERATURE) : config.model.temperature;
+            const maxTokens = process.env.OPENROUTER_MAX_TOKENS ? parseInt(process.env.OPENROUTER_MAX_TOKENS, 10) : config.model.maxTokens;
+
             logger.api(`Tentativa ${attempt + 1} de ${MAX_RETRIES}`, {
                 personality: config.personality.name,
-                model: config.model.name,
+                model: modelName,
                 context: config.context.name
             });
             
@@ -99,16 +110,16 @@ async function handleMessage(historico, userMessage, userId = null) {
                 historico_length: limitedHistory.length,
                 message_length: userMessage.length,
                 personality: config.personality.name,
-                model: config.model.name
+                model: modelName
             });
 
             const response = await axios.post(
                 'https://openrouter.ai/api/v1/chat/completions',
                 {
-                    model: config.model.name,
+                    model: modelName,
                     messages,
-                    temperature: config.model.temperature,
-                    max_tokens: config.model.maxTokens
+                    temperature,
+                    max_tokens: maxTokens
                 },
                 {
                     headers: {
@@ -186,40 +197,6 @@ async function handleMessage(historico, userMessage, userId = null) {
     throw lastError || new Error('Todas as tentativas falharam');
 }
 
-// Função para melhorar transcrições com configuração dinâmica
-async function improveTranscriptionWithAI(transcription, userId = null) {
-    const config = aiConfigManager.generateConfig(userId);
-    
-    const improvementPrompt = `
-Você é um especialista em melhorar transcrições de áudio em português brasileiro.
-
-Sua tarefa é pegar uma transcrição com problemas (palavras mal transcritas, codificação, abreviações) e transformá-la em uma frase clara, coerente e natural, mantendo EXATAMENTE o sentido original.
-
-REGRAS IMPORTANTES:
-1. Mantenha o sentido original - não invente informações
-2. Use português brasileiro natural e informal
-3. Corrija problemas de codificação (est → está, voc → você)
-4. Expanda abreviações comuns (vc → você, tb → também)
-5. Mantenha a informalidade e tom da conversa
-6. Se não conseguir entender, mantenha o original
-
-Exemplo:
-Entrada: "Tudo bem, Niggoti? Que era bordo que ia saber quanto est a hora com voc hoje?"
-Saída: "Tudo bem, niguinho? Que horas são que ia saber quanto está a hora com você hoje?"
-
-Agora melhore esta transcrição: "${transcription}"
-
-Responda APENAS com a versão melhorada, sem explicações.`;
-
-    const improvedTranscription = await handleMessage(
-        { messages: [] }, // Histórico vazio para foco na tarefa
-        improvementPrompt,
-        userId
-    );
-    
-    return improvedTranscription;
-}
-
 // Função para processar mensagem com middleware
 async function processMessageWithMiddleware(message, next) {
     return await pluginSystem.executeMiddleware(message, next);
@@ -252,7 +229,6 @@ function clearCache() {
 
 module.exports = { 
     handleMessage,
-    improveTranscriptionWithAI,
     processMessageWithMiddleware,
     getSystemStats,
     clearCache

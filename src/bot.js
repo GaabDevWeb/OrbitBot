@@ -6,7 +6,6 @@ const performanceMonitor = require('./performance');
 const messageQueue = require('./queue');
 const logger = require('./logger');
 const backupManager = require('./backup');
-const audioProcessor = require('./audioProcessor');
 const { aiConfigManager } = require('./aiConfig');
 const { pluginSystem } = require('./pluginSystem');
 const fs = require('fs');
@@ -114,7 +113,7 @@ async function handleAdminCommand(message) {
             if (!backupCommand) {
                 return `📦 *Sistema de Backup*\n\n` +
                        `*Comandos Disponíveis:*\n\n` +
-                       `📝 *Criação e Gerenciamento*\n` +
+                       `📊 *Estatísticas*\n` +
                        `• /backup criar [nome] - Cria um novo backup (nome opcional)\n` +
                        `• /backup listar - Lista todos os backups\n` +
                        `• /backup excluir [nome] - Exclui um backup específico\n\n` +
@@ -222,161 +221,6 @@ async function handleAdminCommand(message) {
 
                 default:
                     return 'Comando inválido. Digite /backup para ver todos os comandos disponíveis.';
-            }
-
-        case 'audio':
-            const audioCommand = args[0];
-            
-            if (!audioCommand) {
-                return `🎵 *Sistema de Áudio*\n\n` +
-                       `*Comandos Disponíveis:*\n\n` +
-                       `📊 *Estatísticas*\n` +
-                       `• /audio stats - Mostra estatísticas de processamento\n` +
-                       `• /audio status - Mostra status atual do sistema\n\n` +
-                       `🤖 *IA e Melhorias*\n` +
-                       `• /audio correcoes exemplo - Mostra exemplos de melhorias\n` +
-                       `• /audio correcoes testar [texto] - Testa melhoria com IA\n\n` +
-                       `⚙️ *Configurações*\n` +
-                       `• /audio modelo [tiny/base/small/medium/large] - Altera modelo do Whisper\n` +
-                       `• /audio modelo info - Mostra modelo atual\n\n` +
-                       `*Exemplos:*\n` +
-                       `• /audio stats\n` +
-                       `• /audio correcoes exemplo\n` +
-                       `• /audio correcoes testar "Tudo bem, Niggoti?"\n` +
-                       `• /audio modelo medium`;
-            }
-            
-            switch (audioCommand) {
-                case 'stats':
-                    const stats = audioProcessor.getStats();
-                    return `🎵 *Estatísticas de Áudio*\n\n` +
-                           `📊 *Processamento*\n` +
-                           `• Total processado: ${stats.totalProcessed}\n` +
-                           `• Sucessos: ${stats.successfulTranscriptions}\n` +
-                           `• Falhas: ${stats.failedTranscriptions}\n` +
-                           `• Taxa de sucesso: ${stats.totalProcessed > 0 ? ((stats.successfulTranscriptions / stats.totalProcessed) * 100).toFixed(1) : 0}%\n\n` +
-                           `⏱️ *Performance*\n` +
-                           `• Tempo médio: ${stats.averageProcessingTime.toFixed(0)}ms\n` +
-                           `• Processando agora: ${stats.currentlyProcessing}\n\n` +
-                           `💾 *Cache*\n` +
-                           `• Itens em cache: ${stats.cacheSize}`;
-
-                case 'status':
-                    const status = audioProcessor.getStats();
-                    const isHealthy = status.failedTranscriptions === 0 || 
-                                    (status.totalProcessed > 0 && 
-                                     (status.failedTranscriptions / status.totalProcessed) < 0.1);
-                    
-                    return `🎵 *Status do Sistema de Áudio*\n\n` +
-                           `🟢 Status: ${isHealthy ? 'Saudável' : '⚠️ Problemas detectados'}\n` +
-                           `🔄 Processando: ${status.currentlyProcessing} áudios\n` +
-                           `💾 Cache: ${status.cacheSize} transcrições\n` +
-                           `📈 Taxa de sucesso: ${status.totalProcessed > 0 ? ((status.successfulTranscriptions / status.totalProcessed) * 100).toFixed(1) : 0}%`;
-
-                case 'correcoes':
-                    const correcoesSubCommand = args[1];
-                    
-                    if (!correcoesSubCommand) {
-                        return `🔧 *Sistema de Melhoria de Transcrição com IA*\n\n` +
-                               `*Comandos Disponíveis:*\n\n` +
-                               `📋 *Visualização*\n` +
-                               `• /audio correcoes exemplo - Mostra exemplos de melhorias\n` +
-                               `• /audio correcoes testar [texto] - Testa melhoria com IA\n\n` +
-                               `*Exemplos:*\n` +
-                               `• /audio correcoes exemplo\n` +
-                               `• /audio correcoes testar "Tudo bem, Niggoti? Que era bordo?"`;
-                    }
-                    
-                    switch (correcoesSubCommand) {
-                        case 'exemplo':
-                            return `🎯 *Exemplos de Melhoria com IA*\n\n` +
-                                   `*Transcrição original:* "Tudo bem, Niggoti? Que era bordo que ia saber quanto est a hora com voc hoje?"\n\n` +
-                                   `*Após IA:* "Tudo bem, niguinho? Que horas são que ia saber quanto está a hora com você hoje?"\n\n` +
-                                   `*O que a IA faz:*\n` +
-                                   `• Analisa o contexto da conversa\n` +
-                                   `• Corrige problemas de codificação\n` +
-                                   `• Expande abreviações\n` +
-                                   `• Mantém a informalidade\n` +
-                                   `• Preserva o sentido original`;
-                                   
-                        case 'testar':
-                            const testText = args.slice(2).join(' ');
-                            if (!testText) {
-                                return 'Por favor, forneça um texto para testar. Exemplo: /audio correcoes testar "Tudo bem, Niggoti?"';
-                            }
-                            
-                            try {
-                                const improvedText = await audioProcessor.improveTranscriptionWithAI(testText);
-                                return `🧪 *Teste de Melhoria com IA*\n\n` +
-                                       `*Texto original:*\n"${testText}"\n\n` +
-                                       `*Texto melhorado pela IA:*\n"${improvedText}"\n\n` +
-                                       `*A IA analisou o contexto e aplicou melhorias automaticamente*`;
-                            } catch (err) {
-                                return `❌ Erro ao testar melhoria: ${err.message}`;
-                            }
-                                   
-                        default:
-                            return 'Comando inválido. Use: exemplo, testar';
-                    }
-
-                case 'modelo':
-                    const modeloSubCommand = args[1];
-                    
-                    if (!modeloSubCommand) {
-                        return `⚙️ *Configurações*\n\n` +
-                               `• /audio modelo [tiny/base/small/medium/large] - Altera modelo do Whisper\n` +
-                               `• /audio modelo info - Mostra modelo atual\n\n` +
-                               `*Exemplos:*\n` +
-                               `• /audio modelo medium`;
-                    }
-                    
-                    switch (modeloSubCommand) {
-                        case 'tiny':
-                        case 'base':
-                        case 'small':
-                        case 'medium':
-                        case 'large':
-                            const modeloAlterado = audioProcessor.changeModel(modeloSubCommand);
-                            return `⚙️ *Configurações*\n\n` +
-                                   `• Modelo alterado com sucesso para: ${modeloAlterado}\n\n` +
-                                   `🎵 *Sistema de Áudio*\n\n` +
-                                   `*Comandos Disponíveis:*\n\n` +
-                                   `📊 *Estatísticas*\n` +
-                                   `• /audio stats - Mostra estatísticas de processamento\n` +
-                                   `• /audio status - Mostra status atual do sistema\n\n` +
-                                   `🤖 *IA e Melhorias*\n` +
-                                   `• /audio correcoes exemplo - Mostra exemplos de melhorias\n` +
-                                   `• /audio correcoes testar [texto] - Testa melhoria com IA\n\n` +
-                                   `*Exemplos:*\n` +
-                                   `• /audio stats\n` +
-                                   `• /audio correcoes exemplo\n` +
-                                   `• /audio correcoes testar "Tudo bem, Niggoti?"\n` +
-                                   `• /audio modelo medium`;
-
-                        case 'info':
-                            const modeloAtual = audioProcessor.getModel();
-                            return `⚙️ *Configurações*\n\n` +
-                                   `• Modelo atual: ${modeloAtual}\n\n` +
-                                   `🎵 *Sistema de Áudio*\n\n` +
-                                   `*Comandos Disponíveis:*\n\n` +
-                                   `📊 *Estatísticas*\n` +
-                                   `• /audio stats - Mostra estatísticas de processamento\n` +
-                                   `• /audio status - Mostra status atual do sistema\n\n` +
-                                   `🤖 *IA e Melhorias*\n` +
-                                   `• /audio correcoes exemplo - Mostra exemplos de melhorias\n` +
-                                   `• /audio correcoes testar [texto] - Testa melhoria com IA\n\n` +
-                                   `*Exemplos:*\n` +
-                                   `• /audio stats\n` +
-                                   `• /audio correcoes exemplo\n` +
-                                   `• /audio correcoes testar "Tudo bem, Niggoti?"\n` +
-                                   `• /audio modelo medium`;
-
-                        default:
-                            return 'Comando inválido. Use: tiny, base, small, medium, large, info';
-                    }
-
-                default:
-                    return 'Comando inválido. Digite /audio para ver todos os comandos disponíveis.';
             }
 
         case 'ai':
@@ -702,31 +546,6 @@ function startBot() {
         client.onMessage(async (message) => {
             if (!message.from.includes('@c.us') || message.isGroupMsg) return;
 
-            // Processa mensagens de áudio com o novo sistema
-            if (message.type === 'audio' || (message.mimetype && message.mimetype.startsWith('audio'))) {
-                logger.info('Mensagem de áudio recebida', {
-                    from: message.from,
-                    mimetype: message.mimetype,
-                    size: message.data?.length || 0
-                });
-
-                try {
-                    // Decripta o arquivo de áudio
-                    const buffer = await client.decryptFile(message);
-                    message.data = buffer;
-                    
-                    // Processa com o novo sistema
-                    await audioProcessor.processAudioMessage(client, message);
-                } catch (err) {
-                    logger.error('Erro ao processar áudio', { 
-                        error: err.message,
-                        from: message.from
-                    });
-                    await client.sendText(message.from, '❌ Erro ao processar seu áudio. Tente novamente.');
-                }
-                return;
-            }
-
             logger.info('Nova mensagem recebida', {
                 from: message.from,
                 body: message.body,
@@ -761,33 +580,5 @@ function startBot() {
         performanceMonitor.addError();
     });
 }
-
-// Rotina para remover áudios temporários (mais antigos que 1 hora)
-const AUDIO_EXPIRATION_MS = 60 * 60 * 1000; // 1 hora
-const CLEANUP_INTERVAL = 10 * 60 * 1000; // 10 minutos
-
-setInterval(() => {
-    const audioDir = path.join(__dirname, '../audios');
-    const now = Date.now();
-    
-    // Limpa áudios temporários
-    if (fs.existsSync(audioDir)) {
-        fs.readdirSync(audioDir).forEach(file => {
-            const filePath = path.join(audioDir, file);
-            try {
-                const stats = fs.statSync(filePath);
-                if (now - stats.mtimeMs > AUDIO_EXPIRATION_MS) {
-                    fs.unlinkSync(filePath);
-                    logger.info('Áudio removido (expirado)', { file });
-                }
-            } catch (err) {
-                logger.error('Erro ao tentar remover áudio expirado', { 
-                    file, 
-                    error: err.message 
-                });
-            }
-        });
-    }
-}, CLEANUP_INTERVAL);
 
 module.exports = { startBot };

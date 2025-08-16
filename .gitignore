@@ -14,12 +14,6 @@ logs/
 *.tmp
 *.temp
 
-# Arquivos de áudio temporários
-audios/
-
-# Arquivos de transcrição
-transcricao.txt
-
 # Arquivos de ambiente
 .env
 .env.local

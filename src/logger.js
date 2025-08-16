@@ -61,15 +61,6 @@ const logger = {
                     totalMensagens = row.totalMensagens;
                 }
 
-                // Busca estatísticas de áudio
-                let audioStats = { totalProcessed: 0, successfulTranscriptions: 0, cacheSize: 0 };
-                try {
-                    const audioProcessor = require('./audioProcessor');
-                    audioStats = audioProcessor.getStats();
-                } catch (err) {
-                    // Ignora erro se o módulo não estiver disponível
-                }
-
                 console.log('\n=== MÉTRICAS DE PERFORMANCE ===');
                 console.log(`Tempo de execução: ${uptime} segundos`);
                 console.log(`Total de mensagens: ${messageCount}`);
@@ -81,12 +72,6 @@ const logger = {
                 console.log('\n=== DADOS DO BANCO ===');
                 console.log(`Total de clientes: ${totalClientes}`);
                 console.log(`Total de mensagens no histórico: ${totalMensagens}`);
-                
-                console.log('\n=== SISTEMA DE ÁUDIO ===');
-                console.log(`Áudios processados: ${audioStats.totalProcessed}`);
-                console.log(`Transcrições bem-sucedidas: ${audioStats.successfulTranscriptions}`);
-                console.log(`Taxa de sucesso: ${audioStats.totalProcessed > 0 ? ((audioStats.successfulTranscriptions / audioStats.totalProcessed) * 100).toFixed(1) : 0}%`);
-                console.log(`Cache de transcrições: ${audioStats.cacheSize} itens`);
                 console.log('==============================\n');
             });
         });
