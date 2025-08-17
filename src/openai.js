@@ -1,34 +1,19 @@
 require('dotenv').config();
-const axios = require('axios');
 const logger = require('./logger');
 const { aiConfigManager } = require('./aiConfig');
 const { pluginSystem } = require('./pluginSystem');
+const openrouterProvider = require('./providers/openrouterProvider');
+const cache = require('./core/cache');
+const retry = require('./core/retry');
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const MAX_RETRIES = 3;
-const INITIAL_TIMEOUT = 5000;
-const CACHE_TTL = 1800000; // 30 minutos
-
-// Cache para respostas frequentes com LRU
-const responseCache = new Map();
-const MAX_CACHE_SIZE = 1000;
-
-// Limpa o cache periodicamente
-setInterval(() => {
-    const now = Date.now();
-    for (const [key, value] of responseCache.entries()) {
-        if (now - value.timestamp > CACHE_TTL) {
-            responseCache.delete(key);
-        }
-    }
-}, 300000); // Limpa a cada 5 minutos
-
-async function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
+const MAX_RETRIES = parseInt(process.env.OPENAI_MAX_RETRIES || '3', 10);
+const INITIAL_TIMEOUT = parseInt(process.env.OPENAI_INITIAL_TIMEOUT || '8000', 10);
+const MAX_TIMEOUT = parseInt(process.env.OPENAI_MAX_TIMEOUT || '30000', 10);
 
 function generateCacheKey(historico, userMessage, config) {
-    return `${userMessage}-${historico.length}-${config.personality.name}-${config.model.name}`;
+    const histLen = Array.isArray(historico) ? historico.length : (Array.isArray(historico?.messages) ? historico.messages.length : 0);
+    return `${userMessage}-${histLen}-${config.personality.name}-${config.model.name}`;
 }
 
 function limparMensagem(mensagem) {
@@ -72,33 +57,37 @@ async function handleMessage(historico, userMessage, userId = null) {
 
     // Gera chave de cache com configuração
     const cacheKey = generateCacheKey(historico, userMessage, config);
-    const cachedResponse = responseCache.get(cacheKey);
-    
-    if (cachedResponse && (Date.now() - cachedResponse.timestamp) < CACHE_TTL) {
+    const cached = cache.get(cacheKey);
+    if (cached) {
         logger.api('Resposta encontrada no cache');
-        return cachedResponse.response;
+        return cached;
     }
 
-    let lastError;
-    
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-        try {
-            // Permite overrides via ambiente
-            const modelName = process.env.OPENROUTER_MODEL || config.model.name;
+    const responseContent = await retry.execute(async (attempt) => {
+            // Modelo fixo vindo da configuração (sem override por env)
+            const modelName = config.model.name;
             const temperature = process.env.OPENROUTER_TEMPERATURE ? parseFloat(process.env.OPENROUTER_TEMPERATURE) : config.model.temperature;
             const maxTokens = process.env.OPENROUTER_MAX_TOKENS ? parseInt(process.env.OPENROUTER_MAX_TOKENS, 10) : config.model.maxTokens;
+
+            const attemptTimeout = Math.min(INITIAL_TIMEOUT * Math.pow(2, attempt), MAX_TIMEOUT);
 
             logger.api(`Tentativa ${attempt + 1} de ${MAX_RETRIES}`, {
                 personality: config.personality.name,
                 model: modelName,
-                context: config.context.name
+                context: config.context.name,
+                timeoutMs: attemptTimeout
             });
             
-            // Limita histórico baseado no contexto
-            const limitedHistory = historico.messages.slice(-config.maxHistory);
+            // Limita histórico baseado no contexto e cria resumo dos anteriores
+            const maxHistory = process.env.OPENAI_MAX_HISTORY ? parseInt(process.env.OPENAI_MAX_HISTORY, 10) : config.maxHistory;
+            const fullMessages = (historico?.messages || []);
+            const limitedHistory = fullMessages.slice(-maxHistory);
+            const olderHistory = fullMessages.slice(0, Math.max(0, fullMessages.length - maxHistory));
+            const summaryBlock = olderHistory.length ? summarizeHistory(olderHistory) : null;
             
             const messages = [
                 { role: 'system', content: config.systemPrompt },
+                ...(summaryBlock ? [{ role: 'system', content: summaryBlock }] : []),
                 ...limitedHistory.map(item => ({
                     role: item.role,
                     content: limparMensagem(item.mensagem)
@@ -113,58 +102,35 @@ async function handleMessage(historico, userMessage, userId = null) {
                 model: modelName
             });
 
-            const response = await axios.post(
-                'https://openrouter.ai/api/v1/chat/completions',
-                {
-                    model: modelName,
-                    messages,
-                    temperature,
-                    max_tokens: maxTokens
-                },
-                {
-                    headers: {
-                        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-                        'HTTP-Referer': 'https://github.com/GaabDevWeb/OrbitBot',
-                        'X-Title': 'OrbitBot',
-                        'Content-Type': 'application/json'
-                    },
-                    timeout: INITIAL_TIMEOUT * (attempt + 1)
-                }
-            );
+            const content = await openrouterProvider.generate(messages, {
+                apiKey: OPENROUTER_API_KEY,
+                model: modelName,
+                temperature,
+                maxTokens,
+                timeoutMs: attemptTimeout,
+                referer: 'https://github.com/GaabDevWeb/OrbitBot',
+                title: 'OrbitBot'
+            });
 
             logger.api('Resposta recebida da API', {
-                status: response.status,
-                has_content: !!response.data?.choices?.[0]?.message?.content,
+                status: 'ok',
+                has_content: !!content,
                 personality: config.personality.name
             });
 
-            if (!response.data?.choices?.[0]?.message?.content) {
-                throw new Error('Resposta da API inválida');
-            }
-
-            const responseContent = response.data.choices[0].message.content;
-            
             // Executa hooks após o processamento
             const postProcessData = await pluginSystem.executeHook('afterMessage', {
                 message: userMessage,
-                response: responseContent,
+                response: content,
                 historico,
                 config,
                 userId,
                 sentiment: preProcessData.sentiment,
                 sentimentScore: preProcessData.sentimentScore
             });
-            
-            // Implementa LRU cache
-            if (responseCache.size >= MAX_CACHE_SIZE) {
-                const oldestKey = responseCache.keys().next().value;
-                responseCache.delete(oldestKey);
-            }
-            
-            responseCache.set(cacheKey, {
-                response: postProcessData.response,
-                timestamp: Date.now()
-            });
+
+            // Salva em cache
+            cache.set(cacheKey, postProcessData.response);
 
             // Executa hook de mensagem processada
             await pluginSystem.executeHook('messageProcessed', {
@@ -176,25 +142,46 @@ async function handleMessage(historico, userMessage, userId = null) {
             });
 
             return postProcessData.response;
-        } catch (error) {
-            lastError = error;
+    }, {
+        retries: MAX_RETRIES,
+        baseDelayMs: 800,
+        factor: 2,
+        shouldRetry: (error) => {
+            // Retry somente em timeout/ECONNRESET/5xx
+            const status = error?.response?.status;
+            const code = error?.code;
+            if (status && status >= 500) return true;
+            if (code === 'ECONNRESET' || code === 'ECONNABORTED' || code === 'ETIMEDOUT') return true;
+            // Axios timeout
+            if (error?.message && /timeout/i.test(error.message)) return true;
+            return false;
+        },
+        onError: (error, attempt) => {
             logger.error(`Erro na tentativa ${attempt + 1}`, {
                 message: error.message,
                 status: error.response?.status,
                 data: error.response?.data,
-                personality: config.personality.name,
-                model: config.model.name
+                code: error.code
             });
-            
-            if (attempt < MAX_RETRIES - 1) {
-                const backoffTime = Math.pow(2, attempt) * 1000;
-                logger.api(`Tentativa ${attempt + 1} falhou. Tentando novamente em ${backoffTime}ms...`);
-                await sleep(backoffTime);
-            }
         }
-    }
+    });
 
-    throw lastError || new Error('Todas as tentativas falharam');
+    return responseContent;
+}
+
+// Gera um resumo simples local dos itens antigos do histórico sem chamar API externa
+function summarizeHistory(items) {
+    try {
+        const parts = items.map(it => `${it.role === 'user' ? 'U' : 'A'}: ${limparMensagem(it.mensagem)}`)
+            .filter(Boolean);
+        // Heurística: corta em ~800 chars e remove redundâncias simples
+        let joined = parts.join('\n');
+        joined = joined.replace(/\s+/g, ' ').trim();
+        if (joined.length > 800) joined = joined.slice(-800);
+        return `Contexto resumido (anteriores): ${joined}`;
+    } catch (e) {
+        return null;
+    }
 }
 
 // Função para processar mensagem com middleware
@@ -206,11 +193,7 @@ async function processMessageWithMiddleware(message, next) {
 function getSystemStats() {
     const aiStats = aiConfigManager.getStats();
     const pluginStats = pluginSystem.getStats();
-    const cacheStats = {
-        size: responseCache.size,
-        maxSize: MAX_CACHE_SIZE,
-        ttl: CACHE_TTL
-    };
+    const cacheStats = cache.stats();
 
     return {
         ai: aiStats,
@@ -221,10 +204,7 @@ function getSystemStats() {
 
 // Função para limpar cache
 function clearCache() {
-    const size = responseCache.size;
-    responseCache.clear();
-    logger.info('Cache limpo', { previousSize: size });
-    return size;
+    return cache.clear();
 }
 
 module.exports = { 

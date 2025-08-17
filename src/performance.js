@@ -8,6 +8,9 @@ class PerformanceMonitor {
         this.errorCount = 0;
         this.totalResponseTime = 0;
         this.metricsInterval = null;
+
+        this.prevMemoryMB = 0;
+        this.prevCpu1Min = 0;
     }
 
     start() {
@@ -34,18 +37,33 @@ class PerformanceMonitor {
     logMetrics() {
         const uptime = Math.floor((Date.now() - this.startTime) / 1000);
         const avgResponseTime = this.messageCount > 0 ? this.totalResponseTime / this.messageCount : 0;
-        const memoryUsage = process.memoryUsage();
-        const cpuLoad = os.loadavg()[0];
 
-        logger.info('=== MÉTRICAS DE PERFORMANCE ===');
-        logger.info(`Tempo de execução: ${uptime} segundos`);
-        logger.info(`Total de mensagens: ${this.messageCount}`);
-        logger.info(`Tempo médio de resposta: ${avgResponseTime.toFixed(2)}ms`);
-        logger.info(`Erros: ${this.errorCount}`);
-        logger.info(`Uso de memória: ${Math.floor(memoryUsage.heapUsed / 1024 / 1024)}MB (${Math.floor(memoryUsage.heapTotal / 1024 / 1024)}MB)`);
-        logger.info(`CPU Load (1min): ${cpuLoad.toFixed(2)}`);
-        logger.info('==============================');
+        const mu = process.memoryUsage();
+        const memory = {
+            heapUsed: Math.floor(mu.heapUsed / 1024 / 1024),
+            heapTotal: Math.floor(mu.heapTotal / 1024 / 1024)
+        };
+        const cpu1 = os.loadavg()[0] || 0;
+        const cpu = { '1min': Number(cpu1.toFixed ? cpu1.toFixed(2) : cpu1) };
+
+        const memoryDiff = memory.heapUsed - this.prevMemoryMB;
+        const cpuDiff = cpu['1min'] - this.prevCpu1Min;
+
+        this.prevMemoryMB = memory.heapUsed;
+        this.prevCpu1Min = cpu['1min'];
+
+        // Emite métricas estruturadas (o logger também imprime no console e emite para o painel)
+        logger.performance({
+            uptime,
+            messageCount: this.messageCount,
+            errorCount: this.errorCount,
+            avgResponseTime,
+            memory,
+            memoryDiff,
+            cpu,
+            cpuDiff
+        });
     }
 }
 
-module.exports = new PerformanceMonitor(); 
+module.exports = new PerformanceMonitor();

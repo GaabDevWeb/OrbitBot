@@ -1,6 +1,21 @@
 const fs = require('fs');
 const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
+const EventEmitter = require('events');
+
+// Emissor de eventos para painel em tempo real
+const emitter = new EventEmitter();
+function emitLog(level, category, message, data = {}) {
+    try {
+        emitter.emit('log', {
+            ts: Date.now(),
+            level,
+            category,
+            message,
+            data
+        });
+    } catch (_) { /* noop */ }
+}
 
 const logger = {
     info: (message, data = {}) => {
@@ -8,6 +23,7 @@ const logger = {
         if (Object.keys(data).length > 0) {
             console.log('Dados:', data);
         }
+        emitLog('info', 'general', message, data);
     },
 
     error: (message, data = {}) => {
@@ -15,6 +31,7 @@ const logger = {
         if (Object.keys(data).length > 0) {
             console.log('Dados:', data);
         }
+        emitLog('error', 'general', message, data);
     },
 
     debug: (message, data = {}) => {
@@ -22,6 +39,7 @@ const logger = {
         if (Object.keys(data).length > 0) {
             console.log('Dados:', data);
         }
+        emitLog('debug', 'general', message, data);
     },
 
     performance: (data) => {
@@ -30,10 +48,10 @@ const logger = {
             messageCount,
             errorCount,
             avgResponseTime,
-            memory,
-            memoryDiff,
-            cpu,
-            cpuDiff
+            memory = {},
+            memoryDiff = 0,
+            cpu = {},
+            cpuDiff = 0
         } = data;
 
         // Lê informações do banco de dados SQLite
@@ -73,6 +91,23 @@ const logger = {
                 console.log(`Total de clientes: ${totalClientes}`);
                 console.log(`Total de mensagens no histórico: ${totalMensagens}`);
                 console.log('==============================\n');
+
+                // Emite evento de métricas para o painel
+                try {
+                    emitter.emit('metrics', {
+                        ts: Date.now(),
+                        uptime,
+                        messageCount,
+                        errorCount,
+                        avgResponseTime,
+                        memory,
+                        memoryDiff,
+                        cpu,
+                        cpuDiff,
+                        totalClientes,
+                        totalMensagens
+                    });
+                } catch (_) { /* noop */ }
             });
         });
     },
@@ -82,6 +117,7 @@ const logger = {
         if (Object.keys(data).length > 0) {
             console.log('Dados:', data);
         }
+        emitLog('info', 'api', message, data);
     },
 
     queue: (message, data = {}) => {
@@ -89,7 +125,19 @@ const logger = {
         if (Object.keys(data).length > 0) {
             console.log('Dados:', data);
         }
-    }
+        emitLog('info', 'queue', message, data);
+    },
+
+    // Utilitário para outros módulos emitirem eventos customizados (ex.: métricas)
+    emitEvent: (type, payload = {}) => {
+        try {
+            emitter.emit(type, { ts: Date.now(), ...payload });
+        } catch (_) { /* noop */ }
+    },
+
+    // Assinatura para o painel
+    on: (event, listener) => emitter.on(event, listener),
+    off: (event, listener) => emitter.off(event, listener)
 };
 
-module.exports = logger; 
+module.exports = logger;

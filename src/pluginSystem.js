@@ -63,6 +63,39 @@ class PluginSystem {
         return true;
     }
 
+    // Carrega plugins da pasta padrão plugins/
+    loadFromDirectory() {
+        try {
+            if (!fs.existsSync(this.pluginDir)) {
+                logger.warn('Diretório de plugins não existe', { dir: this.pluginDir });
+                return;
+            }
+
+            const files = fs.readdirSync(this.pluginDir).filter(f => f.endsWith('.js'));
+            files.forEach(file => {
+                const fullPath = path.join(this.pluginDir, file);
+                try {
+                    const mod = require(fullPath);
+                    const plugin = mod && typeof mod === 'object' ? (mod.default || mod) : null;
+                    if (!plugin) {
+                        logger.warn('Arquivo de plugin inválido (sem export de objeto)', { file });
+                        return;
+                    }
+
+                    const name = plugin.name || path.parse(file).name;
+                    const ok = this.registerPlugin(name, plugin);
+                    if (!ok) {
+                        logger.warn('Falha ao registrar plugin do diretório', { file, name });
+                    }
+                } catch (err) {
+                    logger.error('Erro ao carregar plugin do diretório', { file, error: err.message });
+                }
+            });
+        } catch (err) {
+            logger.error('Erro ao varrer diretório de plugins', { error: err.message, dir: this.pluginDir });
+        }
+    }
+
     // Valida estrutura do plugin
     validatePlugin(plugin) {
         const required = ['name', 'version', 'description'];
@@ -328,7 +361,11 @@ Object.entries(defaultPlugins).forEach(([name, plugin]) => {
     pluginSystem.registerPlugin(name, plugin);
 });
 
+// Carrega plugins externos do diretório padrão
+pluginSystem.loadFromDirectory();
+
 module.exports = {
+    PluginSystem,
     pluginSystem,
     defaultPlugins
-}; 
+};
