@@ -38,6 +38,18 @@ npm install
 const OPENROUTER_API_KEY = 'sua-chave-openrouter-aqui';
 ```
 
+## Execução
+
+Inicie o bot com:
+
+```bash
+npm start
+```
+
+Na primeira execução, um QR Code será exibido no terminal (e/ou uma janela do navegador será aberta, conforme a opção `headless` em `src/bot.js`). Escaneie o QR Code com o WhatsApp (Dispositivos conectados > Conectar um dispositivo).
+
+Os dados da sessão do **WPPConnect** são armazenados na pasta `./tokens` (nome da sessão: `sessionName`). Essa pasta já está no `.gitignore` e não deve ser versionada.
+
 ## Funcionalidades Principais
 
 ### **IA e Respostas**

@@ -1,3 +1,9 @@
+/**
+ * Envia o texto de forma humanizada (em trechos com pequenos atrasos).
+ * @param {object} client - Cliente WPPConnect (de wppconnect.create())
+ * @param {string} chatId - ID do chat no formato normalizado (ex.: numero@c.us)
+ * @param {string} texto - Texto a enviar
+ */
 async function simularRespostaHumana(client, chatId, texto) {
     await new Promise(resolve => setTimeout(resolve, 400 + Math.random() * 200));
 

@@ -2,9 +2,10 @@
 node_modules/
 package-lock.json
 
-# Arquivos de sessão do WhatsApp
+# Arquivos de sessão do WhatsApp (WPPConnect usa ./tokens por padrão)
 tokens/
 *.session
+wppconnect-session/
 
 # Logs
 logs/
