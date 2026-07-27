@@ -2,7 +2,8 @@
 node_modules/
 package-lock.json
 
-# Arquivos de sessão do WhatsApp (WPPConnect usa ./tokens por padrão)
+# Sessão WhatsApp (Baileys)
+auth/
 tokens/
 *.session
 wppconnect-session/
@@ -33,6 +34,10 @@ Thumbs.db
 # Arquivos de backup (exceto logs de backup)
 database/backups/*/
 !database/backups/backup_log.json
+
+# Banco SQLite local (não versionar dados reais)
+database/data/*.db
+database/data/*.db-*
 
 # Arquivos de cache
 .cache/

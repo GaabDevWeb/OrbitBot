@@ -1,6 +1,8 @@
-const { startBot } = require('./src/bot');
-const { startDashboardServer } = require('./src/dashboard');
+require('dotenv').config();
 
-// Inicia painel antes do bot
-startDashboardServer(3000);
-startBot();
+const { startBot } = require('./src/bot');
+
+startBot().catch((err) => {
+  console.error('Falha ao iniciar OrbitBot:', err);
+  process.exit(1);
+});

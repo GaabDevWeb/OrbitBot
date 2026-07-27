@@ -1,277 +1,151 @@
+require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
 const logger = require('./logger');
 
-// Configurações de modelos disponíveis (padronizado para o mesmo modelo)
-const DS_FREE_MODEL = 'deepseek/deepseek-chat-v3-0324:free';
-const AI_MODELS = {
-    'deepseek-chat': {
-        name: DS_FREE_MODEL,
-        maxTokens: 800,
-        temperature: 0.7,
-        description: 'Modelo principal para conversas gerais (DeepSeek V3 0324 Free)'
-    },
-    'deepseek-coder': {
-        name: DS_FREE_MODEL,
-        maxTokens: 800,
-        temperature: 0.5,
-        description: 'Alias para o mesmo modelo (padronizado)'
-    },
-    'deepseek-chat-33b': {
-        name: DS_FREE_MODEL,
-        maxTokens: 800,
-        temperature: 0.7,
-        description: 'Alias para o mesmo modelo (padronizado)'
-    }
-};
+/** Fallback se nenhuma lista/modelo estiver no .env */
+const DEFAULT_OPENROUTER_MODEL = 'deepseek/deepseek-chat-v3-0324:free';
 
-// Personalidades disponíveis
-const PERSONALITIES = {
-    'default': {
-        name: 'Orbit - Assistente Pessoal',
-        description: 'Assistente pessoal do Gabriel',
-        systemPrompt: `Você é o Orbit, assistente pessoal do Gabriel (Gaab). Responda de forma clara, direta e educada. Mantenha as respostas curtas e úteis. Se faltar contexto, faça perguntas objetivas antes de responder.`,
-        model: 'deepseek-chat',
-        contextWindow: 10
-    },
-    
-    'professional': {
-        name: 'Orbit - Profissional',
-        description: 'Versão profissional para clientes',
-        systemPrompt: `Você é o Orbit, assistente pessoal do Gabriel (Gaab). Seja claro e objetivo. Use tom profissional quando necessário. Respostas curtas e práticas.`,
-        model: 'deepseek-chat',
-        contextWindow: 15
-    },
-    
-    'coder': {
-        name: 'Orbit - Desenvolvedor',
-        description: 'Especialista em programação e código',
-        systemPrompt: `Você é o Orbit, assistente pessoal do Gabriel (Gaab). Priorize clareza e objetividade. Quando o tema for código, responda com precisão e de forma sucinta.`,
-        model: 'deepseek-chat',
-        contextWindow: 20
-    },
-    
-    'friendly': {
-        name: 'Orbit - Amigável',
-        description: 'Versão amigável e empática',
-        systemPrompt: `Você é o Orbit, assistente pessoal do Gabriel (Gaab). Seja gentil e direto. Respostas curtas, úteis e acolhedoras.`,
-        model: 'deepseek-chat',
-        contextWindow: 12
-    }
-};
+const DEFAULT_PROMPT_PATH = path.join(__dirname, '..', 'prompts', 'SYSTEM.md');
 
-// Contextos adaptativos
-const CONTEXT_TYPES = {
-    'conversation': {
-        name: 'Conversa Casual',
-        description: 'Contexto para conversas informais',
-        maxHistory: 10,
-        priority: 'low'
-    },
-    'technical': {
-        name: 'Suporte Técnico',
-        description: 'Contexto para questões técnicas',
-        maxHistory: 15,
-        priority: 'high'
-    },
-    'business': {
-        name: 'Negócios',
-        description: 'Contexto para assuntos comerciais',
-        maxHistory: 8,
-        priority: 'high'
-    },
-    'personal': {
-        name: 'Pessoal',
-        description: 'Contexto para assuntos pessoais',
-        maxHistory: 5,
-        priority: 'medium'
-    }
-};
-
-// Sistema de configuração dinâmica
-class AIConfigManager {
-    constructor() {
-        this.currentPersonality = 'default';
-        this.currentModel = 'deepseek-chat';
-        this.contextType = 'conversation';
-        this.customSettings = {};
-        this.userPreferences = new Map();
-    }
-
-    // Gerenciamento de personalidades
-    setPersonality(personalityName) {
-        if (!PERSONALITIES[personalityName]) {
-            throw new Error(`Personalidade não encontrada: ${personalityName}`);
+/**
+ * Lista ordenada de model IDs OpenRouter (primário + fallbacks).
+ * @returns {string[]}
+ */
+function resolveOpenRouterModels() {
+  const rawList = process.env.OPENROUTER_MODELS?.trim();
+  if (rawList) {
+    if (rawList.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(rawList);
+        if (Array.isArray(parsed)) {
+          const models = parsed.map((m) => String(m).trim()).filter(Boolean);
+          if (models.length) return models;
         }
-        
-        this.currentPersonality = personalityName;
-        const personality = PERSONALITIES[personalityName];
-        this.currentModel = personality.model;
-        
-        logger.info('Personalidade alterada', {
-            from: this.currentPersonality,
-            to: personalityName,
-            model: this.currentModel
-        });
-        
-        return personality;
+      } catch (_) {
+        /* CSV abaixo */
+      }
     }
+    const csv = rawList
+      .split(',')
+      .map((s) => s.trim().replace(/^["']|["']$/g, ''))
+      .filter(Boolean);
+    if (csv.length) return csv;
+  }
 
-    getPersonality() {
-        return PERSONALITIES[this.currentPersonality];
-    }
+  const single = process.env.OPENROUTER_MODEL?.trim();
+  if (single) return [single];
 
-    listPersonalities() {
-        return Object.keys(PERSONALITIES).map(key => ({
-            id: key,
-            ...PERSONALITIES[key]
-        }));
-    }
-
-    // Gerenciamento de modelos
-    setModel(modelName) {
-        if (!AI_MODELS[modelName]) {
-            throw new Error(`Modelo não encontrado: ${modelName}`);
-        }
-        
-        this.currentModel = modelName;
-        logger.info('Modelo alterado', { model: modelName });
-        return AI_MODELS[modelName];
-    }
-
-    getModel() {
-        return AI_MODELS[this.currentModel];
-    }
-
-    listModels() {
-        return Object.keys(AI_MODELS).map(key => ({
-            id: key,
-            ...AI_MODELS[key]
-        }));
-    }
-
-    // Gerenciamento de contexto
-    setContextType(contextType) {
-        if (!CONTEXT_TYPES[contextType]) {
-            throw new Error(`Tipo de contexto não encontrado: ${contextType}`);
-        }
-        
-        this.contextType = contextType;
-        logger.info('Tipo de contexto alterado', { context: contextType });
-        return CONTEXT_TYPES[contextType];
-    }
-
-    getContextType() {
-        return CONTEXT_TYPES[this.contextType];
-    }
-
-    // Configurações personalizadas por usuário
-    setUserPreference(userId, preference, value) {
-        if (!this.userPreferences.has(userId)) {
-            this.userPreferences.set(userId, {});
-        }
-        
-        const userPrefs = this.userPreferences.get(userId);
-        userPrefs[preference] = value;
-        
-        logger.info('Preferência do usuário definida', {
-            userId,
-            preference,
-            value
-        });
-    }
-
-    getUserPreference(userId, preference) {
-        const userPrefs = this.userPreferences.get(userId);
-        return userPrefs ? userPrefs[preference] : null;
-    }
-
-    // Configurações customizadas
-    setCustomSetting(key, value) {
-        this.customSettings[key] = value;
-        logger.info('Configuração customizada definida', { key, value });
-    }
-
-    getCustomSetting(key) {
-        return this.customSettings[key];
-    }
-
-    // Geração de configuração completa
-    generateConfig(userId = null) {
-        const personality = this.getPersonality();
-        const model = this.getModel();
-        const context = this.getContextType();
-        
-        // Aplica preferências do usuário se disponível
-        let userPersonality = personality;
-        let userModel = model;
-        
-        if (userId) {
-            const userPrefs = this.userPreferences.get(userId);
-            if (userPrefs) {
-                if (userPrefs.personality && PERSONALITIES[userPrefs.personality]) {
-                    userPersonality = PERSONALITIES[userPrefs.personality];
-                }
-                if (userPrefs.model && AI_MODELS[userPrefs.model]) {
-                    userModel = AI_MODELS[userPrefs.model];
-                }
-            }
-        }
-
-        return {
-            personality: userPersonality,
-            model: userModel,
-            context: context,
-            customSettings: this.customSettings,
-            maxHistory: context.maxHistory,
-            systemPrompt: userPersonality.systemPrompt
-        };
-    }
-
-    // Validação de configuração
-    validateConfig(config) {
-        const errors = [];
-        
-        if (!config.personality) errors.push('Personalidade não definida');
-        if (!config.model) errors.push('Modelo não definido');
-        if (!config.context) errors.push('Contexto não definido');
-        if (!config.systemPrompt) errors.push('Prompt do sistema não definido');
-        
-        return {
-            isValid: errors.length === 0,
-            errors
-        };
-    }
-
-    // Reset de configurações
-    resetToDefault() {
-        this.currentPersonality = 'default';
-        this.currentModel = 'deepseek-chat';
-        this.contextType = 'conversation';
-        this.customSettings = {};
-        
-        logger.info('Configurações resetadas para padrão');
-    }
-
-    // Estatísticas de uso
-    getStats() {
-        return {
-            totalPersonalities: Object.keys(PERSONALITIES).length,
-            totalModels: Object.keys(AI_MODELS).length,
-            totalContextTypes: Object.keys(CONTEXT_TYPES).length,
-            currentPersonality: this.currentPersonality,
-            currentModel: this.currentModel,
-            currentContext: this.contextType,
-            userPreferencesCount: this.userPreferences.size,
-            customSettingsCount: Object.keys(this.customSettings).length
-        };
-    }
+  return [DEFAULT_OPENROUTER_MODEL];
 }
 
-// Instância global do gerenciador
+function resolveOpenRouterModelId() {
+  return resolveOpenRouterModels()[0];
+}
+
+function resolvePromptPath() {
+  const fromEnv = process.env.SYSTEM_PROMPT_PATH?.trim();
+  if (fromEnv) {
+    return path.isAbsolute(fromEnv)
+      ? fromEnv
+      : path.join(process.cwd(), fromEnv);
+  }
+  return DEFAULT_PROMPT_PATH;
+}
+
+/**
+ * Carrega o system prompt (persona) a partir do ficheiro Markdown.
+ * O conteúdo do .md é enviado tal como está à API (como system message).
+ */
+function loadSystemPrompt(filePath = resolvePromptPath()) {
+  try {
+    const content = fs.readFileSync(filePath, 'utf8').trim();
+    if (!content) {
+      throw new Error(`System prompt vazio: ${filePath}`);
+    }
+    return { systemPrompt: content, promptPath: filePath };
+  } catch (err) {
+    logger.error('Falha ao ler system prompt', {
+      path: filePath,
+      error: err.message,
+    });
+    throw err;
+  }
+}
+
+class AIConfigManager {
+  constructor() {
+    this.systemPrompt = '';
+    this.promptPath = resolvePromptPath();
+    this.maxHistory = parseInt(process.env.OPENAI_MAX_HISTORY || '10', 10);
+    this.temperature = process.env.OPENROUTER_TEMPERATURE
+      ? parseFloat(process.env.OPENROUTER_TEMPERATURE)
+      : 0.7;
+    this.maxTokens = process.env.OPENROUTER_MAX_TOKENS
+      ? parseInt(process.env.OPENROUTER_MAX_TOKENS, 10)
+      : 800;
+  }
+
+  /** Carrega/recarrega o persona a partir do .md */
+  loadPrompt() {
+    const { systemPrompt, promptPath } = loadSystemPrompt();
+    this.systemPrompt = systemPrompt;
+    this.promptPath = promptPath;
+    logger.info('System prompt (persona) carregado', {
+      path: promptPath,
+      chars: systemPrompt.length,
+    });
+    return this.systemPrompt;
+  }
+
+  /** Compat com boot antigo */
+  async hydrate() {
+    this.loadPrompt();
+  }
+
+  generateConfig(_userId = null) {
+    if (!this.systemPrompt) {
+      this.loadPrompt();
+    }
+    return {
+      systemPrompt: this.systemPrompt,
+      promptPath: this.promptPath,
+      personaName: 'Orbit',
+      maxHistory: this.maxHistory,
+      temperature: this.temperature,
+      maxTokens: this.maxTokens,
+      model: { name: resolveOpenRouterModelId() },
+    };
+  }
+
+  validateConfig(config) {
+    const errors = [];
+    if (!config.systemPrompt) errors.push('System prompt não definido');
+    if (!config.model?.name) errors.push('Modelo não definido');
+    return { isValid: errors.length === 0, errors };
+  }
+
+  getStats() {
+    return {
+      persona: 'Orbit',
+      promptPath: this.promptPath,
+      promptChars: this.systemPrompt?.length || 0,
+      maxHistory: this.maxHistory,
+      temperature: this.temperature,
+      maxTokens: this.maxTokens,
+      openRouterModels: resolveOpenRouterModels(),
+    };
+  }
+}
+
 const aiConfigManager = new AIConfigManager();
 
 module.exports = {
-    aiConfigManager,
-    PERSONALITIES,
-    AI_MODELS,
-    CONTEXT_TYPES
-}; 
+  aiConfigManager,
+  resolveOpenRouterModelId,
+  resolveOpenRouterModels,
+  loadSystemPrompt,
+  resolvePromptPath,
+  DEFAULT_OPENROUTER_MODEL,
+  DEFAULT_PROMPT_PATH,
+};
