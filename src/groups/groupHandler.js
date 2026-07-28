@@ -2,8 +2,9 @@ const logger = require('../logger');
 const { userLock } = require('../concurrency');
 const { handleMessage } = require('../openai');
 const { digitsOf, extractText, unwrapMessageContent } = require('../whatsappUtils');
+const { markdownToWhatsapp } = require('../utils/whatsappFormatter');
+const { claimMessageKey } = require('../messageDedupe');
 const groupBuffer = require('./groupBuffer');
-
 const ORBIT_TRIGGER_RE = /@orbit\b/i;
 
 function isGroupJid(jid) {
@@ -117,20 +118,27 @@ async function handleGroupMessage(sock, msg, upsertType = 'notify') {
   if (!isGroupJid(groupJid)) return false;
 
   const fromMe = Boolean(msg.key?.fromMe);
+  const rawPeek = extractText(msg).trim();
 
-  // Ecos da sessão (incl. nossa resposta): não disparam IA.
-  // Resposta da IA entra no buffer no push manual pós-envio (evita duplicar).
-  if (fromMe) {
+  // Ecos da sessão (respostas do bot): não disparam IA.
+  // MODO TESTE: fromMe + @orbit é permitido (dono a testar no próprio telemóvel).
+  if (fromMe && !hasOrbitTrigger(rawPeek)) {
     return true;
   }
 
   if (!msg.message) {
+    logger.info('Grupo: mensagem sem conteúdo (possível falha de decrypt)', {
+      type: upsertType,
+      groupJid,
+      fromMe,
+      msgId: msg.key?.id,
+    });
     return true;
   }
 
-  const rawText = extractText(msg).trim();
+  const rawText = rawPeek || extractText(msg).trim();
   const bufferText = resolveBufferText(msg);
-  const sender = resolveSenderLabel(msg);
+  const sender = fromMe ? 'eu (teste)' : resolveSenderLabel(msg);
 
   // SEMPRE bufferiza mensagens de membros — com ou sem gatilho
   groupBuffer.pushMessage(groupJid, {
@@ -143,6 +151,7 @@ async function handleGroupMessage(sock, msg, upsertType = 'notify') {
     type: upsertType,
     groupJid,
     sender,
+    fromMe,
     bufferSize: groupBuffer.size(groupJid),
     activate: shouldActivateAi(msg, rawText, sock),
     preview: bufferText.slice(0, 80),
@@ -158,10 +167,18 @@ async function handleGroupMessage(sock, msg, upsertType = 'notify') {
     return true;
   }
 
+  // Dedup: o mesmo id não deve disparar várias chamadas OpenRouter
+  if (!claimMessageKey(msg.key)) {
+    logger.info('Grupo: mensagem duplicada ignorada (IA)', {
+      groupJid,
+      msgId: msg.key?.id,
+    });
+    return true;
+  }
+
   const quoted = extractQuotedContext(msg);
 
   await userLock.runExclusive(`group:${groupJid}`, async () => {
-    // Contexto = TODAS as msgs do buffer, injectadas no prompt (ignora maxHistory 1:1)
     const userPayload = groupBuffer.buildContextPrompt(groupJid, {
       question,
       quoted,
@@ -175,7 +192,6 @@ async function handleGroupMessage(sock, msg, upsertType = 'notify') {
       hasQuote: Boolean(quoted),
     });
 
-    // historico vazio: o contexto já vai no userPayload
     const resposta = await handleMessage({ messages: [] }, userPayload, groupJid);
     if (!resposta) {
       await sock.sendMessage(groupJid, {
@@ -184,11 +200,14 @@ async function handleGroupMessage(sock, msg, upsertType = 'notify') {
       return;
     }
 
-    await sock.sendMessage(groupJid, { text: String(resposta) });
+    const waText = markdownToWhatsapp(String(resposta));
+    logger.info('Grupo: a enviar resposta', { groupJid, chars: waText.length });
+    await sock.sendMessage(groupJid, { text: waText });
+    logger.info('Grupo: resposta enviada', { groupJid });
 
     groupBuffer.pushMessage(groupJid, {
       sender: 'OrbitBot (IA)',
-      text: String(resposta),
+      text: waText,
       isBot: true,
     });
   });

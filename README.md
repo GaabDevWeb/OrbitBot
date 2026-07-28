@@ -51,21 +51,26 @@ Sessão Baileys: pasta `./auth/` (gitignored).
 ## Arquitectura (resumo)
 
 ```
-WhatsApp → Baileys → filtro 1:1 → [/ admin] ou [mutex JID → IA → envio imediato]
-                                      ↓
-                                  SQLite (clientes, historico, config)
+WhatsApp → Baileys → grupos (@orbit/menção) | 1:1 (@orbit)
+                         ↓                        ↓
+                   buffer RAM 40            mutex → SQLite
+                         ↓                        ↓
+                    OpenRouter ←────────────── openai.js
+                         ↓
+              markdownToWhatsapp → sendMessage
 ```
 
 - Sem fila MessageQueue, sem PluginSystem, sem dashboard HTTP.
-- **Grupos:** só responde com `@orbit` ou menção ao bot; contexto em memória (15 msgs), sem SQLite.
-- Preferências `/ai` persistem na tabela `config`.
-- Grupos e broadcasts são ignorados.
+- **1:1 (modo teste):** só mensagens com prefixo `@orbit` (inclui `fromMe` / `append`).
+- **Grupos:** buffer em memória (40 msgs); IA com `@orbit` ou menção; sem SQLite.
+- Persona: `prompts/SYSTEM.md`. Modelos: `OPENROUTER_MODELS` com fallback.
+- Preferências `/ai` persistem na tabela `config` quando aplicável.
 
 ## Comandos admin (só `ADMIN_NUMBERS`)
 
 | Comando | Função |
 |---------|--------|
-| `/ai` | Personalidade, modelo, stats, cache |
+| `/ai` | Prompt, stats, cache |
 | `/backup` | Criar/listar/restaurar backups do SQLite |
 | `/historico <id\|numero> [página]` | Consultar histórico |
 | `/reset` / `/reset confirmar` | Apaga clientes+histórico (preserva `config`) |
@@ -80,6 +85,7 @@ npm run check
 
 ## Documentação
 
-- `docs/RELATORIO-GERAL.md` — inventário do sistema legado (pré-migração)
+- `docs/RELATORIO-GERAL.md` — inventário técnico actual (Baileys, grupos, formatter, IA)
+- `docs/WHATSAPP-MARKDOWN-MAPPING.md` — matriz Markdown → WhatsApp
 - `docs/prd/2026-07-26-refactor-baileys.md` — PRD da refatoração
 - `docs/ARCHITECTURE.md` · `docs/DATA-MODEL.md` · `docs/API_SPEC.md`

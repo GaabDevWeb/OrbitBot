@@ -71,12 +71,15 @@ function shouldFallbackToNextModel(error) {
 }
 
 function shouldRetrySameModel(error) {
+  // Timeout → falhar este modelo e ir ao fallback (não esperar 8s+16s no mesmo)
+  if (error?.code === 'ETIMEDOUT') return false;
+  if (error?.message && /timeout/i.test(error.message)) return false;
+
   const status = error?.response?.status;
   const code = error?.code;
   if (status && status >= 500) return true;
   if (status === 429) return true;
-  if (code === 'ECONNRESET' || code === 'ECONNABORTED' || code === 'ETIMEDOUT') return true;
-  if (error?.message && /timeout/i.test(error.message)) return true;
+  if (code === 'ECONNRESET' || code === 'ECONNABORTED') return true;
   return false;
 }
 
@@ -84,7 +87,8 @@ async function generateWithModelFallback(messages, config) {
   const models = resolveOpenRouterModels();
   const temperature = config.temperature;
   const maxTokens = config.maxTokens;
-
+  // 1 tentativa por modelo; em timeout/falha vai logo ao próximo da lista
+  const retriesPerModel = 1;
   let lastError;
 
   for (let i = 0; i < models.length; i++) {
@@ -99,7 +103,7 @@ async function generateWithModelFallback(messages, config) {
             MAX_TIMEOUT
           );
 
-          logger.api(`Tentativa ${attempt + 1} de ${MAX_RETRIES}`, {
+          logger.api(`Tentativa ${attempt + 1} de ${retriesPerModel}`, {
             persona: config.personaName,
             model: modelName,
             modelIndex: i + 1,
@@ -107,7 +111,7 @@ async function generateWithModelFallback(messages, config) {
             timeoutMs: attemptTimeout,
           });
 
-          return openrouterProvider.generate(messages, {
+          const out = await openrouterProvider.generate(messages, {
             apiKey: OPENROUTER_API_KEY,
             model: modelName,
             temperature,
@@ -116,10 +120,16 @@ async function generateWithModelFallback(messages, config) {
             referer: 'https://github.com/GaabDevWeb/OrbitBot',
             title: 'OrbitBot',
           });
+
+          logger.api('Resposta OpenRouter OK', {
+            model: modelName,
+            chars: String(out).length,
+          });
+          return out;
         },
         {
-          retries: MAX_RETRIES,
-          baseDelayMs: 800,
+          retries: retriesPerModel,
+          baseDelayMs: 500,
           factor: 2,
           shouldRetry: shouldRetrySameModel,
           onError: (error, attempt) => {

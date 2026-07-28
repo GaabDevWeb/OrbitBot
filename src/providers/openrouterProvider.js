@@ -54,27 +54,45 @@ async function generate(messages, options) {
 
   if (!apiKey) throw new Error('OPENROUTER_API_KEY ausente');
 
-  const response = await api.post(
-    'https://openrouter.ai/api/v1/chat/completions',
-    {
-      model,
-      messages,
-      temperature,
-      max_tokens: maxTokens,
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'HTTP-Referer': referer,
-        'X-Title': title,
-      },
-      timeout: timeoutMs,
-    }
-  );
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  const content = response.data?.choices?.[0]?.message?.content;
-  if (!content) throw new Error('Resposta da API inválida');
-  return content;
+  try {
+    const response = await api.post(
+      'https://openrouter.ai/api/v1/chat/completions',
+      {
+        model,
+        messages,
+        temperature,
+        max_tokens: maxTokens,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'HTTP-Referer': referer,
+          'X-Title': title,
+        },
+        timeout: timeoutMs,
+        signal: controller.signal,
+      }
+    );
+
+    const content = response.data?.choices?.[0]?.message?.content;
+    if (!content) {
+      const errDetail = response.data?.error?.message || 'Resposta da API inválida';
+      throw new Error(errDetail);
+    }
+    return content;
+  } catch (err) {
+    if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED' || err.name === 'AbortError') {
+      const e = new Error(`Timeout OpenRouter após ${timeoutMs}ms (modelo ${model})`);
+      e.code = 'ETIMEDOUT';
+      throw e;
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 module.exports = { generate };

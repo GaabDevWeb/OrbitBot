@@ -4,6 +4,7 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  makeCacheableSignalKeyStore,
 } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const qrcode = require('qrcode-terminal');
@@ -23,10 +24,11 @@ const {
   isAdmin,
   loadAdminNumbers,
 } = require('./whatsappUtils');
+const { markdownToWhatsapp } = require('./utils/whatsappFormatter');
+const { claimMessageKey } = require('./messageDedupe');
 // MODO TESTE (@orbit) — branch refactor/test-trigger-mode; fácil de remover
 const { matchTestTrigger } = require('./testTrigger');
 const { handleGroupMessage, isGroupJid } = require('./groups/groupHandler');
-
 const AUTH_DIR = path.join(__dirname, '..', 'auth');
 
 aiAdmin.register(commandBus, {
@@ -49,12 +51,16 @@ async function connectWhatsApp() {
   }
 
   const sock = makeWASocket({
-    auth: state,
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys, logger.baileys),
+    },
     version,
     logger: logger.baileys,
     printQRInTerminal: false,
     syncFullHistory: false,
     markOnlineOnConnect: false,
+    getMessage: async () => undefined,
   });
 
   sock.ev.on('creds.update', saveCreds);
@@ -101,7 +107,15 @@ async function connectWhatsApp() {
 
         // MODO TESTE 1:1: fromMe costuma chegar como append
         if (type !== 'notify' && type !== 'append') continue;
-        if (!msg.message) continue;
+        if (!msg.message) {
+          logger.info('1:1: mensagem sem conteúdo (possível falha de decrypt)', {
+            type,
+            jid,
+            fromMe: Boolean(msg.key?.fromMe),
+            msgId: msg.key?.id,
+          });
+          continue;
+        }
 
         if (!isPrivateChat(jid)) {
           logger.debug('Ignorada (não é chat 1:1 nem grupo)', {
@@ -122,6 +136,11 @@ async function connectWhatsApp() {
           continue;
         }
         if (!body) continue;
+
+        if (!claimMessageKey(msg.key)) {
+          logger.info('1:1: mensagem duplicada ignorada', { jid, msgId: msg.key?.id });
+          continue;
+        }
 
         logger.info('Nova mensagem recebida (modo @orbit)', {
           type,
@@ -144,7 +163,10 @@ async function connectWhatsApp() {
           continue;
         }
 
-        await sock.sendMessage(jid, { text: String(resposta) });
+        const waText = markdownToWhatsapp(String(resposta));
+        logger.info('1:1: a enviar resposta', { jid, chars: waText.length });
+        await sock.sendMessage(jid, { text: waText });
+        logger.info('1:1: resposta enviada', { jid });
       } catch (err) {
         logger.error('Erro no processamento de mensagem', {
           error: err.message,

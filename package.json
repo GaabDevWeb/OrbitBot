@@ -5,7 +5,7 @@
   "scripts": {
     "start": "node app.js",
     "test": "node --test --test-force-exit test/*.test.js",
-    "check": "node --check app.js && node --check src/bot.js && node --check src/openai.js && node --check src/core/messageHandler.js && node --check database/index.js"
+    "check": "node --check app.js && node --check src/bot.js && node --check src/openai.js && node --check src/core/messageHandler.js && node --check src/utils/whatsappFormatter.js && node --check database/index.js"
   },
   "author": "gaab",
   "description": "Girando em torno de suas necessidades",

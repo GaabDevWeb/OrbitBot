@@ -1,14 +1,16 @@
 # OrbitBot — Relatório Geral Técnico
 
-> Bot de WhatsApp com IA (OpenRouter/DeepSeek), SQLite, fila de mensagens, plugins e painel de métricas em tempo real.
+> Assistente WhatsApp (1:1 e grupos) com IA via OpenRouter, SQLite, Baileys e formatação nativa WhatsApp.
 
-[![Stack](https://img.shields.io/badge/stack-Node.js%20%7C%20WPPConnect%20%7C%20SQLite%20%7C%20OpenRouter-informational)]()
+[![Status](https://img.shields.io/badge/status-activo-success)]()
+[![Stack](https://img.shields.io/badge/stack-Node.js%20%7C%20Baileys%206.7.18%20%7C%20SQLite%20%7C%20OpenRouter-informational)]()
 [![Entrypoint](https://img.shields.io/badge/entrypoint-app.js-lightgrey)]()
-[![IA](https://img.shields.io/badge/IA-DeepSeek%20V3%20Free-blue)]()
+[![Testes](https://img.shields.io/badge/npm%20test-48%20pass-success)]()
 
-**Data do relatório:** 2026-07-26  
-**Fonte de verdade:** código-fonte do repositório (inspeção directa)  
-**Escopo:** arquitetura, fluxo, dependências, banco, admin, modelos de IA, limitações conhecidas
+**Data do relatório:** 2026-07-28  
+**Branch de referência:** `refactor/test-trigger-mode` (base Baileys)  
+**Fonte de verdade:** código + `.agent_history.md` + `npm test` (48/48)  
+**Escopo:** arquitetura actual, fluxos, dados, IA, grupos, formatação, admin, limitações
 
 ---
 
@@ -16,36 +18,43 @@
 
 - [1. Visão geral](#1-visão-geral)
 - [2. Arquitetura](#2-arquitetura)
-- [3. Fluxo de uma mensagem](#3-fluxo-de-uma-mensagem)
-- [4. Dependências (libs)](#4-dependências-libs)
+- [3. Fluxos de mensagem](#3-fluxos-de-mensagem)
+- [4. Dependências](#4-dependências)
 - [5. Banco de dados](#5-banco-de-dados)
 - [6. Backup](#6-backup)
-- [7. IA — modelos, prompts e provider](#7-ia--modelos-prompts-e-provider)
-- [8. Comandos administrativos](#8-comandos-administrativos)
-- [9. Plugins](#9-plugins)
-- [10. Performance, cache, fila e retry](#10-performance-cache-fila-e-retry)
-- [11. Dashboard e métricas](#11-dashboard-e-métricas)
+- [7. IA — modelos, persona e provider](#7-ia--modelos-persona-e-provider)
+- [8. Grupos](#8-grupos)
+- [9. Formatação Markdown → WhatsApp](#9-formatação-markdown--whatsapp)
+- [10. Comandos administrativos](#10-comandos-administrativos)
+- [11. Concorrência, cache, retry e dedupe](#11-concorrência-cache-retry-e-dedupe)
 - [12. Configuração e variáveis de ambiente](#12-configuração-e-variáveis-de-ambiente)
 - [13. Estrutura de pastas](#13-estrutura-de-pastas)
-- [14. Limitações e discrepâncias README ↔ código](#14-limitações-e-discrepâncias-readme--código)
-- [15. Como executar](#15-como-executar)
+- [14. Testes e verificação](#14-testes-e-verificação)
+- [15. Limitações e TBD](#15-limitações-e-tbd)
+- [16. Como executar](#16-como-executar)
+- [17. Evolução (changelog sintético)](#17-evolução-changelog-sintético)
+- [18. Referências](#18-referências)
 
 ---
 
 ## 1. Visão geral
 
-O **OrbitBot** é um assistente pessoal via WhatsApp. Recebe mensagens através do **WPPConnect**, mantém contexto em **SQLite**, gera respostas via **OpenRouter** (modelo DeepSeek free) e devolve o texto com simulação de digitação humana.
+O **OrbitBot** é um assistente pessoal via WhatsApp. O canal adopta **@whiskeysockets/baileys**; a IA passa por **OpenRouter** (cadeia de modelos com fallback); o contexto 1:1 persiste em **SQLite**; grupos usam **buffer em memória**.
 
 | Dimensão | Decisão adoptada |
 |----------|------------------|
-| Canal | WhatsApp (sessão WPPConnect, pasta `./tokens`) |
-| Persistência | SQLite (`database/data/orbitbot.db`) — sem JSON de conversas |
-| IA | OpenRouter Chat Completions → DeepSeek V3 free |
-| Admin | Comandos `/` no WhatsApp, whitelist por número |
-| Observabilidade | Logger + PerformanceMonitor + dashboard HTTP/SSE na porta 3000 |
-| Extensibilidade | `PluginSystem` com hooks + pasta `plugins/` |
+| Canal | Baileys 6.7.18 — sessão em `./auth/` (QR no terminal) |
+| Persistência 1:1 | SQLite (`database/data/orbitbot.db`) — `clientes`, `historico`, `config` |
+| Grupos | Buffer RAM (máx. 40 msgs) — **sem** SQLite |
+| IA | OpenRouter Chat Completions — `OPENROUTER_MODELS` ordenada |
+| Persona | Ficheiro único `prompts/SYSTEM.md` |
+| Admin | Comandos `/` no WhatsApp — whitelist `ADMIN_NUMBERS` |
+| Observabilidade | `pino` (sem dashboard HTTP) |
+| Formatação de saída | `markdownToWhatsapp` no envio Baileys |
 
-**Responsabilidade do sistema:** responder conversas 1:1 de forma contextualizada, com histórico persistente, sem processar grupos.
+**Responsabilidade do sistema:** responder em 1:1 (modo teste: prefixo `@orbit`) e em grupos (`@orbit` ou menção ao bot), com histórico contextual, fallback de modelos e texto compatível com a sintaxe nativa do WhatsApp.
+
+**Removido face ao legado (pré-2026-07-26):** WPPConnect, MessageQueue, pipeline, PluginSystem, dashboard `:3000`, humanizer fragmentado, repositórios públicos, pasta `plugins/`.
 
 ---
 
@@ -57,444 +66,352 @@ O **OrbitBot** é um assistente pessoal via WhatsApp. Recebe mensagens através 
 flowchart TD
   subgraph entry [Entrada]
     WA[WhatsApp]
-    WPP[WPPConnect client]
+    BL[Baileys sock]
     APP[app.js]
   end
 
   subgraph core [Núcleo]
     BOT[bot.js]
-    Q[MessageQueue]
-    PIPE[pipeline.js]
+    DEDUPE[messageDedupe]
     CB[commandBus]
+    MH[messageHandler]
+    LOCK[UserLock / concurrency]
+  end
+
+  subgraph groups [Grupos]
+    GH[groupHandler]
+    GB[groupBuffer RAM]
   end
 
   subgraph aiLayer [Camada IA]
     OAI[openai.js]
     CFG[aiConfig.js]
-    PLG[pluginSystem]
     OR[openrouterProvider]
+    FMT[whatsappFormatter]
   end
 
-  subgraph dataLayer [Dados]
-    CREPO[clientsRepo]
-    HREPO[historyRepo]
-    DB[(SQLite orbitbot.db)]
+  subgraph dataLayer [Dados 1:1]
+    DATA[database / data layer]
+    DB[(SQLite)]
     BK[backup.js]
   end
 
-  subgraph obs [Observabilidade]
-    LOG[logger]
-    PERF[performance]
-    DASH[dashboard :3000]
-  end
-
-  APP --> DASH
   APP --> BOT
-  WA --> WPP --> BOT
-  BOT -->|admin /| CB
-  BOT -->|mensagem| Q --> PIPE
-  PIPE --> CREPO --> DB
-  PIPE --> HREPO --> DB
-  PIPE --> OAI
+  WA --> BL --> BOT
+  BOT -->|@g.us| GH
+  GH --> GB
+  GH --> LOCK
+  GH --> OAI
+  BOT -->|1:1 @orbit| DEDUPE
+  BOT -->|/ admin| CB
+  BOT -->|IA 1:1| MH
+  MH --> LOCK
+  MH --> DATA --> DB
+  MH --> OAI
   OAI --> CFG
-  OAI --> PLG
   OAI --> OR
-  BOT --> LOG
-  PERF --> LOG
-  LOG --> DASH
+  BOT -->|send| FMT
+  GH -->|send| FMT
+  FMT --> BL
   BK --> DB
 ```
 
-**Porquê esta topologia:** separa canal (WPPConnect), orquestração (bot + fila + pipeline), IA (provider + config + plugins) e persistência (repos → SQLite). O dashboard só observa eventos do logger — não participa do caminho crítico da mensagem.
+A topologia **isola** o canal Baileys da orquestração (`bot` / `groupHandler`), da IA (provider + fallback) e da persistência 1:1. Grupos partilham a mesma IA, mas **não** o SQLite de conversas — o contexto vive só em `groupBuffer`.
 
 ### 2.2 Bootstrap
 
 ```
 npm start → node app.js
-  ├─ startDashboardServer(3000)
+  ├─ filtra ruído libsignal (Closing session / Bad MAC) no stdout/stderr
   └─ startBot()
-       ├─ performanceMonitor.start()
-       ├─ regista comandos admin no commandBus
-       ├─ wppconnect.create({ session: 'sessionName', ... })
-       │    └─ sessão em ./tokens
-       └─ client.onMessage + messageQueue.on('process')
+       ├─ aiConfigManager.hydrate()  ← prompts/SYSTEM.md (+ config SQLite se houver)
+       ├─ avisos se faltar OPENROUTER_API_KEY / ADMIN_NUMBERS
+       └─ connectWhatsApp()
+            ├─ useMultiFileAuthState(auth/)
+            ├─ makeCacheableSignalKeyStore
+            ├─ QR via qrcode-terminal
+            └─ messages.upsert → grupos | 1:1
 ```
 
-Efeitos colaterais no `require`:
-- `backup.js` — agenda backup automático a cada 6h
-- `pluginSystem.js` — carrega plugins padrão + ficheiros em `plugins/`
+Efeito colateral no `require`: `backup.js` agenda backup automático do SQLite (intervalo definido no módulo).
 
 ### 2.3 Padrões reconhecíveis
 
 | Padrão | Onde |
 |--------|------|
-| Repository | `clientsRepo`, `historyRepo` sobre `database/` |
-| Command Bus | `commandBus` + handlers em `commands/admin/*` |
-| Provider | `openrouterProvider` isolado do motor `openai.js` |
-| Hook/Plugin | `pluginSystem` (`beforeMessage`, `afterMessage`, …) |
-| Pipeline | `core/pipeline.js` orquestra dados → IA → persistência |
+| Command Bus | `commandBus` + `commands/admin/*` |
+| Provider | `openrouterProvider` isolado de `openai.js` |
+| Mutex por chave | `concurrency.UserLock` — JID 1:1 e `group:{jid}` |
+| Deduplicação | `messageDedupe.claimMessageKey` (TTL ~3 min) |
+| Data layer unificada | `database/` — contrato em `docs/contracts/data-layer.md` |
+| Sanitizador de saída | `utils/whatsappFormatter` (spec → implementação) |
 
 ---
 
-## 3. Fluxo de uma mensagem
+## 3. Fluxos de mensagem
+
+### 3.1 Um-para-um (modo teste `@orbit`)
 
 ```mermaid
 sequenceDiagram
-  participant User as Utilizador WhatsApp
-  participant WPP as WPPConnect
+  participant U as Utilizador
+  participant BL as Baileys
   participant Bot as bot.js
-  participant Bus as commandBus
-  participant Queue as MessageQueue
-  participant Pipe as pipeline
+  participant Ded as messageDedupe
+  participant MH as messageHandler
   participant AI as openai.js
   participant OR as OpenRouter
   participant DB as SQLite
-  participant Hum as humanizer
+  participant Fmt as whatsappFormatter
 
-  User->>WPP: mensagem
-  WPP->>Bot: onMessage
-  Bot->>Bot: normalize + filtro grupo/@c.us
-
-  alt começa com / e isAdmin
-    Bot->>Bus: execute(comando)
-    Bus-->>Bot: texto resposta
-    Bot->>User: sendText
-  else mensagem normal
-    Bot->>Queue: addMessage
-    Note over Queue: buffer 15s por remetente
-    Queue->>Bot: emit process
-    Bot->>Pipe: run(from, body)
-    Pipe->>DB: getOrCreate + getRecent(50)
-    Pipe->>AI: handleMessage
-    AI->>AI: hooks beforeMessage / cache
-    alt cache miss e sem autoResponse
-      AI->>OR: chat/completions
-      OR-->>AI: content
+  U->>BL: texto (fromMe ou remoto)
+  BL->>Bot: messages.upsert notify|append
+  Bot->>Bot: isPrivateChat + extractText
+  Bot->>Bot: matchTestTrigger(@orbit)
+  alt sem @orbit
+    Bot-->>Bot: ignorar
+  else com @orbit
+    Bot->>Ded: claimMessageKey
+    alt duplicada
+      Bot-->>Bot: ignorar
+    else primeira vez
+      alt / e ADMIN_NUMBERS
+        Bot->>Bot: commandBus.execute
+        Bot->>BL: sendMessage
+      else IA
+        Bot->>MH: run(jid, body sem prefixo)
+        MH->>DB: getOrCreate + getRecent
+        MH->>AI: handleMessage
+        AI->>OR: generateWithModelFallback
+        OR-->>AI: content MD
+        AI-->>MH: resposta
+        MH->>DB: appendHistory async
+        MH-->>Bot: resposta MD
+        Bot->>Fmt: markdownToWhatsapp
+        Bot->>BL: sendMessage WA
+      end
     end
-    AI-->>Pipe: resposta
-    Pipe-->>DB: append user+assistant async
-    Pipe-->>Bot: resposta
-    Bot->>Hum: simularRespostaHumana
-    Hum->>User: sendText fragmentado
   end
 ```
 
-**Passos detalhados:**
+**Regras 1:1 (branch actual):**
 
-1. **Normalização** — `from`, `body`, `isGroupMsg`; chatId forçado a `numero@c.us`
-2. **Filtro** — ignora grupos e IDs que não sejam `@c.us` / `@s.whatsapp.net`
-3. **Admin shortcut** — `/…` de admin bypassa a fila
-4. **Buffer** — mensagens do mesmo remetente agrupadas até 15s (combinadas com `\n`)
-5. **Fila FIFO** — processamento sequencial
-6. **Pipeline** — cliente + histórico em paralelo → IA → persistência fire-and-forget
-7. **Humanizer** — fragmenta e atrasa envio (não usa indicador “digitando” nativo)
+1. Aceita `type` `notify` **e** `append` (necessário para `fromMe` no Baileys).
+2. Só processa se o texto começar com `@orbit` (case-insensitive) — `src/testTrigger.js`.
+3. Prefixo removido antes de admin/IA.
+4. Histórico SQLite guarda o Markdown **cru** da LLM; a conversão WA ocorre **uma vez** no envio (função não idempotente).
+
+### 3.2 Grupo (`@g.us`)
+
+```mermaid
+sequenceDiagram
+  participant M as Membro
+  participant BL as Baileys
+  participant GH as groupHandler
+  participant GB as groupBuffer
+  participant AI as openai.js
+  participant Fmt as whatsappFormatter
+
+  M->>BL: mensagem no grupo
+  BL->>GH: handleGroupMessage
+  GH->>GB: pushMessage sempre
+  alt sem @orbit e sem menção ao bot
+    GH-->>GH: só buffer
+  else activação
+    GH->>GH: claimMessageKey
+    GH->>AI: handleMessage com buildContextPrompt
+    AI-->>GH: Markdown
+    GH->>Fmt: markdownToWhatsapp
+    GH->>BL: sendMessage
+    GH->>GB: push resposta bot
+  end
+```
+
+**Regras de grupo:**
+
+| Regra | Comportamento |
+|-------|----------------|
+| Buffer | Todas as msgs de membros (máx. 40; texto truncado a 300 chars) |
+| Activação IA | `@orbit` **ou** menção JID do bot |
+| `fromMe` | Ignorado **excepto** `fromMe` + `@orbit` (modo teste no telemóvel do bot) |
+| Persistência | Sem SQLite — só RAM |
+| Mutex | `group:{groupJid}` |
+| Contexto | `buildContextPrompt` injecta o buffer **completo** (não corta por `maxHistory` 1:1) |
 
 ---
 
-## 4. Dependências (libs)
+## 4. Dependências
 
-Fonte: `package.json` / `package-lock.json`.
+Fonte: `package.json` (versão do produto `2.0.0`).
 
-| Pacote | Versão declarada | Resolvida (lock) | Papel no OrbitBot |
-|--------|------------------|------------------|-------------------|
-| `@wppconnect-team/wppconnect` | `^1.41.0` | `1.41.0` | Sessão WhatsApp, QR, `onMessage`, `sendText` |
-| `sqlite3` | `^5.1.7` | `5.1.7` | Persistência de clientes e histórico |
-| `axios` | `^1.9.0` | `1.13.6` | HTTP para OpenRouter (+ plugin weather, não no fluxo principal) |
-| `dotenv` | `^16.5.0` | `16.5.0` | Carrega `.env` em `src/openai.js` |
+| Pacote | Versão | Papel |
+|--------|--------|-------|
+| `@whiskeysockets/baileys` | `6.7.18` | Sessão WhatsApp, eventos, envio |
+| `@hapi/boom` | `^10.0.1` | Status de desconexão Baileys |
+| `axios` | `^1.9.0` | HTTP OpenRouter |
+| `dotenv` | `^16.5.0` | Carregar `.env` |
+| `pino` | `^9.14.0` | Logs estruturados |
+| `qrcode-terminal` | `^0.12.0` | QR no terminal |
+| `sqlite3` | `^5.1.7` | Persistência 1:1 |
 
-- **Sem `devDependencies`.**
-- **Opcional não declarada:** `cacheable-lookup` (DNS cache em `openrouterProvider.js`, silenciosamente desactivada se ausente).
-- **Runtime:** README indica Node ≥ 16; lock actual pode exigir Node ≥ 18 em transitivas — validar no ambiente (`TBD` de verificação local).
+**Runtime:** Node.js ≥ 18 (desenvolvimento verificado com v24.18.0 via nvm).
 
 ---
 
 ## 5. Banco de dados
 
-### 5.1 Localização e lifecycle
+Ficheiro: `database/data/orbitbot.db` (gitignored).
 
-| Item | Valor |
-|------|--------|
-| Ficheiro | `database/data/orbitbot.db` |
-| Driver | `sqlite3` (instância única em `database/db/index.js`) |
-| Schema | Aplicado com `CREATE TABLE IF NOT EXISTS` no boot |
-| Migrations versionadas | Não existem |
+| Tabela | Função |
+|--------|--------|
+| `clientes` | Identidade por número (dígitos) |
+| `historico` | Mensagens `user` / `assistant` do fluxo 1:1 |
+| `config` | Preferências chave/valor (reidratação `/ai` e hydrate) |
 
-### 5.2 Schema
+Contrato público da camada: `docs/contracts/data-layer.md`  
+(`getOrCreateClient`, `appendHistory`, `getRecentHistory`, `getPagedHistory`, `getConfig`, `setConfig`, `resetAllData`).
 
-```mermaid
-erDiagram
-  CLIENTES ||--o{ HISTORICO : possui
-  CLIENTES {
-    int id PK
-    text numero UK
-  }
-  HISTORICO {
-    int id PK
-    int cliente_id FK
-    text role
-    text mensagem
-    int timestamp
-  }
-```
-
-```sql
-CREATE TABLE IF NOT EXISTS clientes (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  numero TEXT UNIQUE NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS historico (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  cliente_id INTEGER NOT NULL,
-  role TEXT NOT NULL,
-  mensagem TEXT NOT NULL,
-  timestamp INTEGER NOT NULL,
-  FOREIGN KEY (cliente_id) REFERENCES clientes(id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_historico_cliente ON historico(cliente_id);
-CREATE INDEX IF NOT EXISTS idx_historico_timestamp ON historico(timestamp);
-```
-
-`role` tipicamente: `user` | `assistant`.
-
-### 5.3 Camadas de acesso
-
-```
-database/db/index.js     → CRUD bruto (callbacks/Promises)
-database/index.js        → fachada / alias PT (ex.: atualizarHistorico)
-src/repositories/*       → API da aplicação
-```
-
-| API de repositório | Função |
-|--------------------|--------|
-| `clientsRepo.getOrCreate(number)` | Garante cliente |
-| `historyRepo.append(clienteId, role, mensagem)` | Insere mensagem |
-| `historyRepo.getPaged(identifier, page)` | Paginação (pageSize 50) |
-| `historyRepo.getRecent(identifier, limit)` | Últimas N (pipeline usa 50) |
-
-Identificadores aceites em histórico: `id` numérico ou `numero@c.us`.
-
-### 5.4 Persistência no fluxo
-
-No `pipeline`: após resposta da IA, `setImmediate` + `Promise.allSettled` grava pergunta e resposta **sem bloquear** o envio ao utilizador.
-
-### 5.5 Cache vs DB
-
-O cache em `src/core/cache.js` **não** cacheia linhas do SQLite — apenas respostas da IA (ver secção 10).
+**Grupos não escrevem nestas tabelas.**
 
 ---
 
 ## 6. Backup
 
-Implementação: `src/backup.js` (`BackupManager`).
-
-| Aspecto | Comportamento |
-|---------|---------------|
-| Destino | `database/backups/<pasta>/` (cópia do `.db`) |
-| Automático | A cada **6 horas**; nome `backup auto_DD-MM-AA_HH-MM` |
-| Manual | `/backup criar [nome]` |
-| Retenção | Mantém os **5** mais recentes; resto → `auto_delete` |
-| Restore | Sobrescreve o `.db` activo (sem snapshot prévio do estado actual) |
-| Log | `database/backups/backup_log.json` |
-
-**Risco residual:** cópia com `copyFileSync` sem lock/`VACUUM INTO` — aceitável em baixa concorrência; pode corromper se houver escrita intensa no momento exacto.
+`src/backup.js` gere cópias do SQLite (criar / listar / restaurar) e agenda backup periódico. Comandos admin: `/backup` (ver secção 10).
 
 ---
 
-## 7. IA — modelos, prompts e provider
+## 7. IA — modelos, persona e provider
 
-### 7.1 Provider OpenRouter
+### Persona
 
-| Campo | Valor |
-|-------|--------|
-| Endpoint | `POST https://openrouter.ai/api/v1/chat/completions` |
-| Auth | `Authorization: Bearer $OPENROUTER_API_KEY` |
-| Headers extra | `HTTP-Referer`, `X-Title: OrbitBot` |
-| Payload | `model`, `messages`, `temperature`, `max_tokens` |
-| Resposta usada | `choices[0].message.content` |
-| Streaming / tools / multimodal | Não |
+- Ficheiro: `prompts/SYSTEM.md` (caminho override: `SYSTEM_PROMPT_PATH`)
+- Carregamento: `aiConfigManager.loadPrompt()` / `hydrate()`
+- Admin: `/ai prompt`, `/ai prompt reload`
+- **Removido:** catálogo de personalidades, aliases `AI_MODELS`, `/ai personalidade`, `/ai modelo`
 
-### 7.2 Modelos suportados (aliases)
+### Cadeia de modelos
 
-Todos os aliases internos apontam para **o mesmo** model ID remoto:
+`resolveOpenRouterModels()` em `aiConfig.js`:
 
-| Alias interno | Model ID OpenRouter | maxTokens | temperature |
-|---------------|---------------------|-----------|-------------|
-| `deepseek-chat` | `deepseek/deepseek-chat-v3-0324:free` | 800 | 0.7 |
-| `deepseek-coder` | `deepseek/deepseek-chat-v3-0324:free` | 800 | 0.5 |
-| `deepseek-chat-33b` | `deepseek/deepseek-chat-v3-0324:free` | 800 | 0.7 |
+1. `OPENROUTER_MODELS` — JSON array ou CSV (ordem = prioridade)
+2. Senão `OPENROUTER_MODEL` (lista de 1)
+3. Senão default `deepseek/deepseek-chat-v3-0324:free`
 
-**Conclusão:** três nomes configuráveis, **um** modelo remoto efectivo. Default: `deepseek-chat`.
+`generateWithModelFallback` (`openai.js`):
 
-Troca via WhatsApp (admin): `/ai modelo <alias>` — **em memória**, não persiste após restart.
+- **1 tentativa por modelo**
+- Em **timeout** → **não** retenta o mesmo modelo; passa ao próximo
+- `401` / `403` → **não** avança na cadeia (falha de auth)
+- Cache em memória (`src/core/cache.js`) indexado por user + mensagem + histórico + prompt + modelos
 
-### 7.3 Personalidades
+### Provider
 
-| Key | Nome | systemPrompt (síntese) |
-|-----|------|------------------------|
-| `default` | Orbit - Assistente Pessoal | Claro, directo, educado; curto; pergunta se faltar contexto |
-| `professional` | Orbit - Profissional | Tom profissional, objectivo, prático |
-| `coder` | Orbit - Desenvolvedor | Precisão e concisão em código |
-| `friendly` | Orbit - Amigável | Gentil, útil, acolhedor |
+`src/providers/openrouterProvider.js` — POST `https://openrouter.ai/api/v1/chat/completions` com AbortController/timeout configurável.
 
-Troca: `/ai personalidade <nome>` (também redefine o alias de modelo da personalidade).
-
-### 7.4 Tipos de contexto (`CONTEXT_TYPES`)
-
-`conversation` (default, maxHistory 10), `technical` (15), `business` (8), `personal` (5).
-
-**Nota:** não há comando admin para trocar `contextType`. O pipeline carrega até 50 mensagens do DB; o corte efectivo para a API depende da config/contexto/`OPENAI_MAX_HISTORY`.
-
-### 7.5 Montagem do prompt (`openai.js`)
-
-1. System = prompt da personalidade  
-2. System opcional = resumo **local** (não-IA) do histórico excedente (até ~800 chars)  
-3. Histórico recente  
-4. Mensagem actual como `user`
-
-### 7.6 `treinamento.js`
-
-Contém prompt legado (ex.: pizzaria). **Não é importado por nenhum módulo** — código morto. O README que recomenda editá-lo está desactualizado; a fonte real é `aiConfig.js`.
-
-### 7.7 Humanizer
-
-`src/humanizer.js`: atraso inicial 400–600 ms; fragmenta por frases / blocos ≤180 chars; atrasos 150–350 ms entre partes. **Não** activa presença “digitando” no WhatsApp.
+**Recomendação operativa:** colocar modelos estáveis primeiro; `openrouter/free` por último (fila/latência). Evidência 2026-07-28: free em 1º causava timeouts e percepção de “bot morto”.
 
 ---
 
-## 8. Comandos administrativos
+## 8. Grupos
 
-### 8.1 Controlo de acesso
+| Módulo | Responsabilidade |
+|--------|------------------|
+| `src/groups/groupHandler.js` | Routing, activação, IA, envio, fromMe+@orbit |
+| `src/groups/groupBuffer.js` | Buffer FIFO 40 msgs / 300 chars |
 
-```javascript
-// src/bot.js
-const ADMIN_NUMBERS = ['…@c.us']; // whitelist hardcoded
+Estado de máquina (simplificado):
+
+```mermaid
+stateDiagram-v2
+  [*] --> Idle
+  Idle --> Buffering: mensagem membro
+  Buffering --> Idle: sem gatilho
+  Buffering --> CallingAI: @orbit ou menção
+  CallingAI --> Sending: OpenRouter OK
+  CallingAI --> Idle: erro / sem resposta
+  Sending --> Idle: sendMessage + push buffer
 ```
 
-- Formato: `CODIGOPAIS + NUMERO + @c.us`
-- Não-admin que envia `/comando` → tratado como mensagem normal (vai para a IA), sem “acesso negado”
-- Grupos: ignorados
+---
 
-### 8.2 Inventário completo
+## 9. Formatação Markdown → WhatsApp
 
-#### `/ai` — `src/commands/admin/ai.js`
+| Artefacto | Papel |
+|-----------|-------|
+| `docs/WHATSAPP-MARKDOWN-MAPPING.md` | Spec / matriz De-Para + regras DEVE/NÃO DEVE + 16 contratos |
+| `src/utils/whatsappFormatter.js` | `markdownToWhatsapp(input)` |
+| `test/whatsapp-formatter.test.js` | Contratos sintéticos |
 
-| Sintaxe | Comportamento |
-|---------|---------------|
-| `/ai` | Menu de ajuda |
-| `/ai personalidade listar` | Lista personalidades |
-| `/ai personalidade info` | Personalidade actual |
-| `/ai personalidade <nome>` | Define personalidade (+ modelo associado) |
-| `/ai modelo listar` | Lista aliases |
-| `/ai modelo info` | Modelo actual |
-| `/ai modelo <alias>` | Define alias de modelo |
-| `/ai plugin listar` | Plugins e estado 🟢/🔴 |
-| `/ai plugin info <nome>` | Detalhe de um plugin |
-| `/ai plugin <nome> on/off` | Activa/desactiva |
-| `/ai stats` | Stats IA + plugins + cache |
+Equivalências críticas:
+
+| Markdown | WhatsApp |
+|----------|----------|
+| `**negrito**` | `*negrito*` |
+| `*itálico*` | `_itálico_` |
+| `~~tachado~~` | `~tachado~` |
+| `# Título` | `*Título*` |
+| `` `code` `` / fences | preservados (lang tag removida) |
+
+Integração: **só no `sendMessage`** (1:1 e grupos). Histórico SQLite permanece em Markdown da LLM.
+
+---
+
+## 10. Comandos administrativos
+
+Autenticação: JID cujos dígitos ∈ `ADMIN_NUMBERS` (DDI, sem `@c.us`).
+
+| Comando | Função |
+|---------|--------|
+| `/ai` | Help persona/cache/stats |
+| `/ai prompt` | Caminho + prévia do SYSTEM.md |
+| `/ai prompt reload` | Recarrega persona do disco |
+| `/ai stats` | Stats + cadeia `OPENROUTER_MODELS` |
 | `/ai cache limpar` | Limpa cache de respostas |
+| `/backup` … | Gestão de backups SQLite |
+| `/historico <id\|numero> [página]` | Histórico paginado |
+| `/reset` / `/reset confirmar` | Apaga clientes+histórico (preserva `config`) |
 
-> **Ausente do README** — documentado apenas aqui e no código.
-
-#### `/backup` — `src/commands/admin/backup.js`
-
-| Sintaxe | Comportamento |
-|---------|---------------|
-| `/backup` | Ajuda |
-| `/backup criar [nome]` | Backup manual |
-| `/backup listar` | Lista (Automático/Manual) |
-| `/backup restaurar <nome>` | Match parcial case-insensitive |
-| `/backup info <nome>` | Stats do backup |
-| `/backup atual` | Stats do `.db` activo |
-| `/backup excluir <nome>` | Remove pasta (sem confirmação dupla) |
-| `/backup logs` | Últimas 10 operações |
-
-#### `/historico` — `src/commands/admin/history.js`
-
-| Sintaxe | Comportamento |
-|---------|---------------|
-| `/historico <id\|numero> [página]` | Página de 50 msgs; default página 1 |
-
-#### `/reset` — `src/commands/admin/db.js`
-
-| Sintaxe | Comportamento |
-|---------|---------------|
-| `/reset` | Aviso (não executa) |
-| `/reset confirmar` | `DELETE` historico + clientes + reset `sqlite_sequence` |
-
-Confirmação **dupla** apenas em `/reset`. Backups **não** são apagados.
+`/ai personalidade`, `/ai modelo`, `/ai plugin*` → respostas de depreciação explícitas.
 
 ---
 
-## 9. Plugins
+## 11. Concorrência, cache, retry e dedupe
 
-### 9.1 Motor (`pluginSystem.js`)
-
-- Registo por nome/versão/descrição
-- Hooks: usados no fluxo real — `beforeMessage`, `afterMessage`, `messageProcessed`
-- Middleware: infraestrutura existe, **não** integrada no fluxo `bot`/`pipeline` (código morto na prática)
-- Carrega `plugins/*.js` no boot
-
-### 9.2 Plugins padrão (embutidos)
-
-`sentimentAnalysis`, `commandDetector`, `autoResponse`, `statistics`
-
-### 9.3 Plugins externos (`plugins/`)
-
-| Plugin | Papel |
-|--------|--------|
-| `fastAutoReply.js` | Hook `beforeMessage`: saudações/curtas → `autoResponse` **sem** chamar OpenRouter |
-| `weatherPlugin.js` | Exemplo (clima mock); middleware/commands não plenamente integrados ao bus |
-
-Gestão: `/ai plugin …`
-
----
-
-## 10. Performance, cache, fila e retry
-
-| Componente | Ficheiro | Comportamento |
-|------------|----------|---------------|
-| Fila | `queue.js` | Buffer 15s/remetente + FIFO; retry de fila pouco efectivo para erros async |
-| Cache IA | `core/cache.js` | TTL 30 min, max 1000, limpeza 5 min; eviction FIFO (não LRU real) |
-| Chave cache | `openai.js` | `mensagem + lenHistórico + personalidade + modelo` (**não** inclui userId) |
-| Retry API | `core/retry.js` | Backoff exponencial; 5xx/timeouts; **429 não** é retriado |
-| Monitor | `performance.js` | Métricas a cada 60s |
-
----
-
-## 11. Dashboard e métricas
-
-- **URL:** `http://localhost:3000/`
-- **SSE:** `/events`
-- **Auth:** nenhuma
-- **Dados:** logs + métricas em memória (uptime, msgs, erros, heap, CPU load, contagens SQLite)
-
-Reinício do processo zera o painel (excepto o que já está no DB).
+| Mecanismo | Módulo | Garantia |
+|-----------|--------|----------|
+| Mutex | `src/concurrency.js` | Serializa processamento por chave (JID / `group:…`) |
+| Cache IA | `src/core/cache.js` | Evita chamadas OpenRouter repetidas |
+| Retry | `src/core/retry.js` | Backoff; política por modelo em `openai.js` |
+| Dedupe | `src/messageDedupe.js` | Mesmo `msg.key.id` não dispara IA duas vezes |
+| Signal keys | `makeCacheableSignalKeyStore` | Auth Baileys mais estável |
 
 ---
 
 ## 12. Configuração e variáveis de ambiente
 
-Carregadas via `dotenv` em `src/openai.js`. Não há `.env.example` no repo (`.env*` no `.gitignore`).
+Modelo: `.env.example` (nunca commitar `.env` com segredos).
 
 <details>
-<summary><strong>Variáveis de ambiente</strong></summary>
+<summary><strong>Variáveis</strong></summary>
 
-| Variável | Obrigatória | Default | Descrição |
-|----------|-------------|---------|-----------|
-| `OPENROUTER_API_KEY` | sim | — | Bearer para OpenRouter |
-| `OPENAI_MAX_RETRIES` | não | `3` | Tentativas totais da operação com retry |
-| `OPENAI_INITIAL_TIMEOUT` | não | `8000` | Timeout inicial (ms) |
-| `OPENAI_MAX_TIMEOUT` | não | `30000` | Timeout máximo (ms) |
-| `OPENROUTER_TEMPERATURE` | não | — | Override da temperatura do modelo |
-| `OPENROUTER_MAX_TOKENS` | não | — | Override de max tokens |
-| `OPENAI_MAX_HISTORY` | não | — | Override do limite de histórico enviado à API |
+| Variável | Obrigatória | Descrição |
+|----------|-------------|-----------|
+| `OPENROUTER_API_KEY` | sim | Bearer OpenRouter |
+| `ADMIN_NUMBERS` | recomendada | Admins (DDI, CSV); sem ela, `/` admin não funciona |
+| `OPENROUTER_MODELS` | não | Lista ordenada JSON/CSV |
+| `OPENROUTER_MODEL` | não | Compat modelo único |
+| `OPENAI_MAX_RETRIES` | não | Legado de retries (fallback usa 1 tentativa/modelo) |
+| `OPENAI_INITIAL_TIMEOUT` | não | Default 8000 ms |
+| `OPENAI_MAX_TIMEOUT` | não | Default 30000 ms |
+| `OPENROUTER_TEMPERATURE` | não | Temperatura |
+| `OPENROUTER_MAX_TOKENS` | não | Max tokens |
+| `OPENAI_MAX_HISTORY` | não | Janela histórico 1:1 |
+| `SYSTEM_PROMPT_PATH` | não | Override do SYSTEM.md |
+| `LOG_LEVEL` | não | Default `info` |
+| `BAILEYS_LOG_LEVEL` | não | Default `silent` |
 
 </details>
-
-**Admin:** editar `ADMIN_NUMBERS` em `src/bot.js`.  
-**Sessão WhatsApp:** pasta `./tokens` (não versionada).
 
 ---
 
@@ -502,95 +419,107 @@ Carregadas via `dotenv` em `src/openai.js`. Não há `.env.example` no repo (`.e
 
 ```
 OrbitBot/
-├── app.js                          # entrypoint
-├── package.json
-├── README.md
-├── docs/
-│   └── RELATORIO-GERAL.md          # este relatório
-├── plugins/
-│   ├── fastAutoReply.js
-│   └── weatherPlugin.js
-├── database/
-│   ├── index.js                    # fachada
-│   ├── db/index.js                 # schema + CRUD
-│   ├── data/orbitbot.db
-│   └── backups/
-└── src/
-    ├── bot.js                      # núcleo WhatsApp
-    ├── dashboard.js
-    ├── queue.js
-    ├── openai.js
-    ├── aiConfig.js
-    ├── humanizer.js
-    ├── backup.js
-    ├── pluginSystem.js
-    ├── logger.js
-    ├── performance.js
-    ├── treinamento.js              # legado / não usado
-    ├── providers/openrouterProvider.js
-    ├── core/{pipeline,cache,retry}.js
-    ├── repositories/{clients,history}Repo.js
-    └── commands/
-        ├── commandBus.js
-        └── admin/{ai,backup,db,history}.js
+├── app.js                 # entry + filtro ruído libsignal
+├── prompts/SYSTEM.md      # persona
+├── auth/                  # sessão Baileys (gitignored)
+├── database/              # SQLite + data layer
+├── docs/                  # PRD, ADR, ARCHITECTURE, este relatório, mapping MD↔WA
+├── src/
+│   ├── bot.js             # Baileys + routing 1:1/grupos
+│   ├── openai.js          # fallback modelos + cache
+│   ├── aiConfig.js        # prompt + resolveOpenRouterModels
+│   ├── testTrigger.js     # modo teste @orbit
+│   ├── messageDedupe.js
+│   ├── concurrency.js
+│   ├── whatsappUtils.js
+│   ├── groups/            # groupHandler + groupBuffer
+│   ├── utils/whatsappFormatter.js
+│   ├── providers/openrouterProvider.js
+│   ├── core/              # messageHandler, cache, retry
+│   └── commands/admin/    # ai, backup, db, history
+└── test/                  # node:test — 48 casos
 ```
 
 ---
 
-## 14. Limitações e discrepâncias README ↔ código
-
-| # | Achado | Impacto |
-|---|--------|---------|
-| 1 | `/ai` não documentado no README | Onboarding incompleto |
-| 2 | README pede API key em `openai.js`; código usa `OPENROUTER_API_KEY` + dotenv | Config incorrecta se seguir README |
-| 3 | `treinamento.js` morto; README ainda aponta para ele | Personalidade real em `aiConfig.js` |
-| 4 | “Contexto total” no README vs `getRecent(50)` + maxHistory de contexto | Expectativa inflada |
-| 5 | 3 aliases de modelo → 1 model ID free | Troca de “modelo” só muda temp/alias |
-| 6 | Preferências IA não persistem (restart = default) | Config volátil |
-| 7 | Cache sem `userId` na chave | Risco teórico de colisão entre utilizadores |
-| 8 | Middleware de plugins não ligado ao fluxo | weatherPlugin middleware inerte |
-| 9 | Retry da fila pouco efectivo com listeners `async` | Estabilidade documentada > real |
-| 10 | Restore/excluir backup sem confirmação dupla | Risco operacional |
-| 11 | Admin hardcoded (sem tabela/env) | Deploy menos flexível |
-| 12 | Sem auth no dashboard :3000 | Expor só em localhost |
-
----
-
-## 15. Como executar
+## 14. Testes e verificação
 
 ```bash
-git clone https://github.com/GaabDevWeb/OrbitBot.git
-cd OrbitBot
-npm install
-
-# criar .env na raiz
-echo 'OPENROUTER_API_KEY=sua-chave' > .env
-
-npm start
-# Dashboard: http://localhost:3000
-# Terminal: escanear QR Code do WhatsApp
+npm test    # 48 pass (2026-07-28)
+npm run check
 ```
 
-Comandos admin apenas de números em `ADMIN_NUMBERS` (`src/bot.js`).
+Cobertura unitária relevante: filtros 1:1, trigger `@orbit`, buffer/handler de grupos, models env, system prompt, formatter (16 contratos), dedupe, concurrency, cache key.
+
+**Não coberto por CI automático:** E2E WhatsApp real (QR, decrypt Signal, entrega em grupo) — validação manual do operador.
 
 ---
 
-## Manutenibilidade
+## 15. Limitações e TBD
 
 | Item | Estado |
 |------|--------|
-| Consolicação `.agent_history.md` | Ciclo MegaBrain 2026-07-26 — relatório documental (sem feature nova) |
-| Evidência | Exploração de `app.js`, `src/**`, `database/**`, `plugins/**`, `package.json` |
-| Phase 0.5 PRD | Excepção documentada — pedido = relatório, não RF novo |
-| Testes automatizados | Ausentes no repo (`TBD` se forem introduzidos) |
-| `.env.example` | Ausente (`TBD` recomendado) |
+| Modo teste `@orbit` em 1:1 | Activo nesta branch — reverter = remover `testTrigger` e restaurar política `fromMe` |
+| Sessões Signal (`Bad MAC`) | Pode exigir re-auth: apagar `auth/`, novo QR |
+| Listas/quote/código inline WA | FAQ oficial: “new formatting” sobretudo Web/Mac — validar por cliente |
+| README vs grupos | README ainda mistura “grupos ignorados” com suporte a grupos — ver secção docs |
+| Merge para `main` | Pendente do operador |
+| Dashboard / plugins / fila | Removidos de propósito — não reintroduzir sem ADR |
 
 ---
 
-## Referências internas
+## 16. Como executar
 
-- README: [`../README.md`](../README.md)
-- Migração Venom → WPPConnect: [`../AGENTE_MIGRACAO_VENOM_PARA_WPPCONNECT.md`](../AGENTE_MIGRACAO_VENOM_PARA_WPPCONNECT.md)
-- Config IA: [`../src/aiConfig.js`](../src/aiConfig.js)
-- Schema DB: [`../database/db/index.js`](../database/db/index.js)
-- Comandos: [`../src/commands/admin/`](../src/commands/admin/)
+```bash
+export PATH="$HOME/.nvm/versions/node/v24.18.0/bin:$PATH"   # se necessário
+cp .env.example .env   # editar chaves
+npm install
+npm start
+```
+
+1. Escaneie o QR (WhatsApp → Dispositivos conectados).  
+2. **1:1:** envie `@orbit oi`.  
+3. **Grupo:** `@orbit …` ou mencione o número do bot.  
+4. Logs esperados: `a processar IA` → `Resposta OpenRouter OK` → `resposta enviada`.
+
+Falha comum #1: `OPENROUTER_API_KEY` ausente ou `openrouter/free` como único/primeiro modelo sob carga → timeouts.
+
+Falha comum #2: sessão corrompida → `Bad MAC` → recriar `auth/`.
+
+---
+
+## 17. Evolução (changelog sintético)
+
+Consolidado de `.agent_history.md`:
+
+| Data | Entrega |
+|------|---------|
+| 2026-07-26 | Relatório geral inicial (legado WPPConnect) |
+| 2026-07-26 | Migração WPPConnect → Baileys; remoção queue/plugins/dashboard |
+| 2026-07-26 | `OPENROUTER_MODEL` / `OPENROUTER_MODELS` + fallback |
+| 2026-07-26 | Modo teste `@orbit` + `fromMe`/`append` |
+| 2026-07-26 | Persona única `prompts/SYSTEM.md` |
+| 2026-07-26 | Grupos: buffer + activação + contexto completo (MAX 40) |
+| 2026-07-28 | Spec `WHATSAPP-MARKDOWN-MAPPING.md` |
+| 2026-07-28 | `markdownToWhatsapp` + integração no envio |
+| 2026-07-28 | Fix “não responde”: dedupe, timeout→fallback, logs send, Signal cache, fromMe+@orbit em grupos |
+
+---
+
+## 18. Referências
+
+| Documento | Conteúdo |
+|-----------|----------|
+| [README.md](../README.md) | Quick start |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Visão arquitectural |
+| [DATA-MODEL.md](DATA-MODEL.md) | Modelo de dados |
+| [API_SPEC.md](API_SPEC.md) | Contratos admin / OpenRouter |
+| [contracts/data-layer.md](contracts/data-layer.md) | Assinaturas da data layer |
+| [WHATSAPP-MARKDOWN-MAPPING.md](WHATSAPP-MARKDOWN-MAPPING.md) | Spec Markdown → WA |
+| [adr/0001-migracao-wppconnect-para-baileys.md](adr/0001-migracao-wppconnect-para-baileys.md) | ADR migração |
+| [prd/2026-07-26-refactor-baileys.md](prd/2026-07-26-refactor-baileys.md) | PRD refatoração |
+| `.agent_history.md` | Log MegaBrain (reidratação) |
+
+---
+
+*Relatório actualizado em 2026-07-28 — substitui a descrição legado WPPConnect/MessageQueue/dashboard do relatório de 2026-07-26.*
