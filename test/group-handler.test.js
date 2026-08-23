@@ -13,23 +13,27 @@ describe('groupHandler helpers', () => {
     assert.equal(isGroupJid('555@s.whatsapp.net'), false);
   });
 
-  it('detecta @orbit case-insensitive', () => {
+  it('detecta @orbit e @~Orbit case-insensitive', () => {
     assert.equal(hasOrbitTrigger('@orbit oi'), true);
     assert.equal(hasOrbitTrigger('fala @ORBIT agora'), true);
+    assert.equal(hasOrbitTrigger('fala @~Orbit agora'), true);
+    assert.equal(hasOrbitTrigger('@~orbit resume'), true);
     assert.equal(hasOrbitTrigger('orbit sem arroba'), false);
   });
 
-  it('sanitiza @orbit e menções', () => {
+  it('sanitiza @orbit / @~Orbit e menções', () => {
     assert.equal(sanitizeQuestion('@orbit oi tudo bem?'), 'oi tudo bem?');
+    assert.equal(sanitizeQuestion('@~Orbit oi tudo bem?'), 'oi tudo bem?');
     assert.equal(
       sanitizeQuestion('@orbit @5511999999999 resume isso'),
       'resume isso'
     );
   });
 
-  it('activa por @orbit mesmo sem menção', () => {
+  it('activa por @orbit / @~Orbit mesmo sem menção', () => {
     const msg = { message: { conversation: '@orbit ajuda' }, key: {} };
     assert.equal(shouldActivateAi(msg, '@orbit ajuda', {}), true);
+    assert.equal(shouldActivateAi(msg, '@~Orbit ajuda', {}), true);
   });
 
   it('activa por mentionedJid do bot', () => {

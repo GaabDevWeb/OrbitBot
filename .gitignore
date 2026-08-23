@@ -41,4 +41,8 @@ database/data/*.db-*
 
 # Arquivos de cache
 .cache/
-*.cache 
+*.cache
+
+# Exports de histórico WhatsApp (ferramenta tools/whatsapp-history)
+exports/*
+!exports/.gitkeep 

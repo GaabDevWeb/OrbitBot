@@ -5,19 +5,44 @@ const { digitsOf, extractText, unwrapMessageContent } = require('../whatsappUtil
 const { markdownToWhatsapp } = require('../utils/whatsappFormatter');
 const { claimMessageKey } = require('../messageDedupe');
 const groupBuffer = require('./groupBuffer');
-const ORBIT_TRIGGER_RE = /@orbit\b/i;
+const { parseKernelResetCommand } = require('../kernelContext');
+const { newTraceId, emitTraceEvent } = require('../traceClient');
+const {
+  hasOrbitTrigger,
+  normalizeTriggerText,
+  stripOrbitTrigger,
+  ORBIT_TRIGGER_RE,
+} = require('../mentionTrigger');
 
 function isGroupJid(jid) {
   return typeof jid === 'string' && jid.endsWith('@g.us');
 }
 
+/**
+ * Identidades do bot: PN (`@s.whatsapp.net`) e LID (`@lid`).
+ * Menções nativas em grupos costumam trazer o LID, não o número.
+ */
 function getBotJids(sock) {
-  const raw = sock?.user?.id || sock?.user?.jid || '';
-  if (!raw) return [];
-  const base = String(raw).split(':')[0];
-  const withServer = base.includes('@') ? base : `${base}@s.whatsapp.net`;
-  const dig = digitsOf(withServer);
-  return [raw, base, withServer, dig].filter(Boolean);
+  const out = [];
+  const push = (raw) => {
+    if (!raw) return;
+    const s = String(raw);
+    out.push(s);
+    const base = s.split(':')[0];
+    out.push(base);
+    if (!base.includes('@')) {
+      // heurística: LID WhatsApp é tipicamente > 14 dígitos
+      const dig = digitsOf(base);
+      if (dig.length >= 14) out.push(`${dig}@lid`);
+      else if (dig) out.push(`${dig}@s.whatsapp.net`);
+    }
+    const dig = digitsOf(base);
+    if (dig) out.push(dig);
+  };
+  push(sock?.user?.id);
+  push(sock?.user?.jid);
+  push(sock?.user?.lid);
+  return [...new Set(out.filter(Boolean))];
 }
 
 function getContextInfo(msg) {
@@ -42,26 +67,44 @@ function isBotMentioned(msg, sock) {
   const mentioned = extractMentionedJids(msg);
   if (!mentioned.length) return false;
   const botIds = getBotJids(sock);
+  const botIdSet = new Set(botIds);
   const botDigits = new Set(botIds.map(digitsOf).filter(Boolean));
 
   return mentioned.some((jid) => {
-    if (botIds.includes(jid)) return true;
-    const dig = digitsOf(jid);
+    const s = String(jid);
+    if (botIdSet.has(s)) return true;
+    const base = s.split(':')[0];
+    if (botIdSet.has(base)) return true;
+    const dig = digitsOf(s);
     return dig && botDigits.has(dig);
   });
 }
 
-function hasOrbitTrigger(text) {
-  return ORBIT_TRIGGER_RE.test(String(text || ''));
+/** Texto `@1357…` (LID) ou `@5555…` (PN) a apontar para o bot. */
+function textMentionsBot(text, sock) {
+  const normalized = normalizeTriggerText(text);
+  const botDigits = new Set(
+    getBotJids(sock)
+      .map(digitsOf)
+      .filter((d) => d.length >= 5)
+  );
+  if (!botDigits.size) return false;
+  for (const m of normalized.matchAll(/@(\d{5,})\b/g)) {
+    if (botDigits.has(m[1])) return true;
+  }
+  return false;
 }
 
 function shouldActivateAi(msg, text, sock) {
-  return hasOrbitTrigger(text) || isBotMentioned(msg, sock);
+  return (
+    hasOrbitTrigger(text) ||
+    isBotMentioned(msg, sock) ||
+    textMentionsBot(text, sock)
+  );
 }
 
 function sanitizeQuestion(text) {
-  return String(text || '')
-    .replace(ORBIT_TRIGGER_RE, ' ')
+  return stripOrbitTrigger(text)
     .replace(/@\d{5,}\b/g, ' ')
     .replace(/@\S+/g, ' ')
     .replace(/\s+/g, ' ')
@@ -147,17 +190,20 @@ async function handleGroupMessage(sock, msg, upsertType = 'notify') {
     isBot: false,
   });
 
+  const activate = shouldActivateAi(msg, rawText, sock);
   logger.info('Grupo: mensagem no buffer', {
     type: upsertType,
     groupJid,
     sender,
     fromMe,
     bufferSize: groupBuffer.size(groupJid),
-    activate: shouldActivateAi(msg, rawText, sock),
+    activate,
+    mentionedJid: extractMentionedJids(msg),
+    hasOrbitText: hasOrbitTrigger(rawText),
     preview: bufferText.slice(0, 80),
   });
 
-  if (!shouldActivateAi(msg, rawText, sock)) {
+  if (!activate) {
     return true;
   }
 
@@ -177,23 +223,80 @@ async function handleGroupMessage(sock, msg, upsertType = 'notify') {
   }
 
   const quoted = extractQuotedContext(msg);
+  // Grupo — user_id = autor (JID completo Baileys), channel_id = grupo
+  let authorFull = msg.key?.participant || '';
+  if (!authorFull && fromMe) {
+    authorFull = String(sock?.user?.id || sock?.user?.jid || '').trim();
+  }
+  if (!authorFull) {
+    authorFull = groupJid;
+  }
+
+  const parsedReset = parseKernelResetCommand(question);
+  // Kernel SSOT: enviar SÓ a pergunta limpa (nunca o buffer de grupo em `message`).
+  // Buffer local permanece para observabilidade; quote/reply curto = etapa futura.
+  const kernelMessage = parsedReset.text;
+
+  const traceId = newTraceId();
+  emitTraceEvent({
+    traceId,
+    stage: 'MESSAGE_RECEIVED',
+    data: {
+      groupJid,
+      authorJid: authorFull,
+      chars: String(kernelMessage).length,
+      channel: 'group',
+    },
+  });
+  emitTraceEvent({
+    traceId,
+    stage: 'MESSAGE_PARSED',
+    data: {
+      resetContext: parsedReset.resetContext,
+      messageChars: String(kernelMessage).length,
+      channel: 'group',
+    },
+  });
 
   await userLock.runExclusive(`group:${groupJid}`, async () => {
-    const userPayload = groupBuffer.buildContextPrompt(groupJid, {
-      question,
-      quoted,
-    });
-
-    logger.info('Grupo: a processar IA com contexto completo', {
+    logger.info('Grupo: a processar IA (Kernel) — pergunta limpa', {
       groupJid,
+      authorJid: authorFull,
       sender,
-      question,
+      question: kernelMessage,
+      resetContext: parsedReset.resetContext,
       bufferSize: groupBuffer.size(groupJid),
       hasQuote: Boolean(quoted),
+      messageChars: String(kernelMessage).length,
+      traceId,
     });
 
-    const resposta = await handleMessage({ messages: [] }, userPayload, groupJid);
+    let resposta;
+    try {
+      resposta = await handleMessage({ messages: [] }, kernelMessage, {
+        userId: authorFull,
+        channelId: groupJid,
+        resetContext: parsedReset.resetContext,
+        traceId,
+      });
+    } catch (err) {
+      emitTraceEvent({
+        traceId,
+        stage: 'ERROR',
+        data: {
+          channel: 'group',
+          message: String(err.message || '').slice(0, 200),
+          code: err.code || null,
+        },
+      });
+      throw err;
+    }
     if (!resposta) {
+      emitTraceEvent({
+        traceId,
+        stage: 'ERROR',
+        data: { reason: 'empty_response', channel: 'group' },
+      });
       await sock.sendMessage(groupJid, {
         text: 'Erro ao processar mensagem. Tente novamente.',
       });
@@ -201,9 +304,14 @@ async function handleGroupMessage(sock, msg, upsertType = 'notify') {
     }
 
     const waText = markdownToWhatsapp(String(resposta));
-    logger.info('Grupo: a enviar resposta', { groupJid, chars: waText.length });
+    logger.info('Grupo: a enviar resposta', { groupJid, chars: waText.length, traceId });
     await sock.sendMessage(groupJid, { text: waText });
-    logger.info('Grupo: resposta enviada', { groupJid });
+    emitTraceEvent({
+      traceId,
+      stage: 'MESSAGE_SENT_TO_WHATSAPP',
+      data: { groupJid, chars: waText.length, channel: 'group' },
+    });
+    logger.info('Grupo: resposta enviada', { groupJid, traceId });
 
     groupBuffer.pushMessage(groupJid, {
       sender: 'OrbitBot (IA)',
@@ -223,5 +331,7 @@ module.exports = {
   extractQuotedContext,
   hasOrbitTrigger,
   isBotMentioned,
+  textMentionsBot,
   getBotJids,
+  ORBIT_TRIGGER_RE,
 };

@@ -3,20 +3,14 @@
  *
  * Isolado na entrada de mensagens. Para reverter: apagar este ficheiro
  * e restaurar o filtro `fromMe` + remover o require em `bot.js`.
+ *
+ * Aceita `@orbit` (escrito) e `@~Orbit` (menção WhatsApp / push name),
+ * incluindo isolates Unicode `\u2068…\u2069` que o WA injeta na menção nativa.
  */
 
-const TRIGGER_RE = /^@orbit\b/i;
-
-/**
- * Se a mensagem começa com @orbit (case-insensitive), devolve o texto higienizado
- * (prefixo removido + trim). Caso contrário, devolve null (ignorar).
- * @param {string} text
- * @returns {string|null}
- */
-function matchTestTrigger(text) {
-  const raw = String(text || '').trim();
-  if (!TRIGGER_RE.test(raw)) return null;
-  return raw.replace(TRIGGER_RE, '').trim();
-}
+const {
+  matchTestTrigger,
+  ORBIT_TRIGGER_START_RE: TRIGGER_RE,
+} = require('./mentionTrigger');
 
 module.exports = { matchTestTrigger, TRIGGER_RE };
