@@ -7,6 +7,31 @@ const http = require('http');
 const { sendOutbound } = require('./send');
 const { status } = require('./session');
 const logger = require('../logger');
+const { resolveKernelBaseUrl } = require('../providers/kernelProvider');
+const { isShuttingDown } = require('../shutdown');
+
+let _kernelHealthCache = { at: 0, ok: false, status: 'unknown' };
+
+async function probeKernelHealth() {
+  const now = Date.now();
+  if (now - _kernelHealthCache.at < 5000) {
+    return _kernelHealthCache;
+  }
+  const baseUrl = resolveKernelBaseUrl();
+  const timeoutMs = 3000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${baseUrl}/v1/health`, { signal: controller.signal });
+    const ok = res.ok;
+    _kernelHealthCache = { at: now, ok, status: ok ? 'ok' : `http_${res.status}` };
+  } catch (err) {
+    _kernelHealthCache = { at: now, ok: false, status: String(err.code || err.message || 'error') };
+  } finally {
+    clearTimeout(timer);
+  }
+  return _kernelHealthCache;
+}
 
 const MAX_BODY = 12 * 1024 * 1024; // 12 MiB
 
@@ -61,7 +86,17 @@ function startInternalHttpServer() {
       const url = new URL(req.url || '/', `http://${host}:${port}`);
 
       if (req.method === 'GET' && url.pathname === '/internal/health') {
-        return json(res, 200, { ok: true, whatsapp: status() });
+        if (isShuttingDown()) {
+          return json(res, 503, { ok: false, draining: true, whatsapp: status() });
+        }
+        const kernel = await probeKernelHealth();
+        const wa = status();
+        const ok = Boolean(wa.ready) && kernel.ok;
+        return json(res, ok ? 200 : 503, {
+          ok,
+          whatsapp: wa,
+          kernel: { reachable: kernel.ok, status: kernel.status },
+        });
       }
 
       if (!authOk(req)) {

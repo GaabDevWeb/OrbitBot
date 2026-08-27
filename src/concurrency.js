@@ -37,6 +37,10 @@ class UserLock {
       }
     }
   }
+
+  pendingCount() {
+    return this.tails.size;
+  }
 }
 
 const userLock = new UserLock();

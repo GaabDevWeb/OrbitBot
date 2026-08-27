@@ -19,6 +19,8 @@ describe('kernelProvider.chat', () => {
           method: req.method,
           auth: req.headers.authorization || null,
           traceId: req.headers['x-trace-id'] || null,
+          messageId: req.headers['x-message-id'] || null,
+          headers: req.headers,
           body: body ? JSON.parse(body) : null,
         };
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -78,6 +80,21 @@ describe('kernelProvider.chat', () => {
     assert.equal(lastReq.body.message, 'olá');
   });
 
+  it('envia X-Message-Id quando messageId é passado', async () => {
+    const { chat } = require('../src/providers/kernelProvider');
+    const { port } = server.address();
+    await chat({
+      baseUrl: `http://127.0.0.1:${port}`,
+      token: '',
+      userId: 'u@s.whatsapp.net',
+      channelId: 'g@g.us',
+      message: 'oi',
+      messageId: 'BAILEYS-MSG-123',
+      timeoutMs: 5000,
+    });
+    assert.equal(lastReq.messageId, 'BAILEYS-MSG-123');
+  });
+
   it('envia X-Trace-Id quando traceId é passado', async () => {
     const { chat } = require('../src/providers/kernelProvider');
     const { port } = server.address();
@@ -91,5 +108,25 @@ describe('kernelProvider.chat', () => {
       timeoutMs: 5000,
     });
     assert.equal(lastReq.traceId, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
+  });
+
+  it('aceita message vazia com invocação contextual', async () => {
+    const { chat } = require('../src/providers/kernelProvider');
+    const { port } = server.address();
+    await chat({
+      baseUrl: `http://127.0.0.1:${port}`,
+      token: '',
+      userId: '5511@s.whatsapp.net',
+      channelId: '120363@g.us',
+      message: '',
+      metadata: {
+        invocation: { type: 'contextual_invocation', explicit_text: false },
+        recent_context: ['João: Dúvida sobre AT'],
+      },
+      timeoutMs: 5000,
+    });
+    assert.equal(lastReq.body.message, '');
+    assert.equal(lastReq.body.metadata.invocation.type, 'contextual_invocation');
+    assert.equal(lastReq.body.metadata.recent_context.length, 1);
   });
 });

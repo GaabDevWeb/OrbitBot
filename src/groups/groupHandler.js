@@ -5,6 +5,7 @@ const { digitsOf, extractText, unwrapMessageContent } = require('../whatsappUtil
 const { markdownToWhatsapp } = require('../utils/whatsappFormatter');
 const { claimMessageKey } = require('../messageDedupe');
 const groupBuffer = require('./groupBuffer');
+const { classifyGroupInvocation, buildRecentContext } = require('./groupInvocation');
 const { parseKernelResetCommand } = require('../kernelContext');
 const { newTraceId, emitTraceEvent } = require('../traceClient');
 const {
@@ -207,11 +208,18 @@ async function handleGroupMessage(sock, msg, upsertType = 'notify') {
     return true;
   }
 
-  const question = sanitizeQuestion(rawText) || bufferText;
-  if (!question || question.startsWith('[')) {
-    logger.info('Grupo: gatilho sem pergunta útil', { groupJid });
-    return true;
+  const sanitized = sanitizeQuestion(rawText);
+  const invocation = classifyGroupInvocation(sanitized);
+  const isContextualOnly = invocation.type === 'contextual_invocation';
+
+  if (invocation.type !== 'contextual_invocation') {
+    if (!sanitized || sanitized.startsWith('[')) {
+      logger.info('Grupo: gatilho sem pergunta útil', { groupJid });
+      return true;
+    }
   }
+
+  const question = sanitized || '';
 
   // Dedup: o mesmo id não deve disparar várias chamadas OpenRouter
   if (!claimMessageKey(msg.key)) {
@@ -235,7 +243,8 @@ async function handleGroupMessage(sock, msg, upsertType = 'notify') {
   const parsedReset = parseKernelResetCommand(question);
   // Kernel SSOT: enviar SÓ a pergunta limpa (nunca o buffer de grupo em `message`).
   // Buffer local permanece para observabilidade; quote/reply curto = etapa futura.
-  const kernelMessage = parsedReset.text;
+  const kernelMessage = isContextualOnly ? '' : parsedReset.text;
+  const recentContext = buildRecentContext(groupBuffer, groupJid);
 
   const traceId = newTraceId();
   emitTraceEvent({
@@ -246,6 +255,7 @@ async function handleGroupMessage(sock, msg, upsertType = 'notify') {
       authorJid: authorFull,
       chars: String(kernelMessage).length,
       channel: 'group',
+      invocationType: invocation.type,
     },
   });
   emitTraceEvent({
@@ -255,8 +265,23 @@ async function handleGroupMessage(sock, msg, upsertType = 'notify') {
       resetContext: parsedReset.resetContext,
       messageChars: String(kernelMessage).length,
       channel: 'group',
+      invocationType: invocation.type,
+      explicitText: invocation.explicit_text,
+      recentContextCount: recentContext.length,
     },
   });
+  if (isContextualOnly) {
+    emitTraceEvent({
+      traceId,
+      stage: 'CONTEXTUAL_INVOCATION',
+      data: {
+        groupJid,
+        authorJid: authorFull,
+        recentMessagesCount: recentContext.length,
+        channel: 'group',
+      },
+    });
+  }
 
   await userLock.runExclusive(`group:${groupJid}`, async () => {
     logger.info('Grupo: a processar IA (Kernel) — pergunta limpa', {
@@ -278,6 +303,11 @@ async function handleGroupMessage(sock, msg, upsertType = 'notify') {
         channelId: groupJid,
         resetContext: parsedReset.resetContext,
         traceId,
+        messageId: msg.key?.id || null,
+        senderName: sender,
+        invocation,
+        recentContext,
+        quoted,
       });
     } catch (err) {
       emitTraceEvent({
@@ -334,4 +364,6 @@ module.exports = {
   textMentionsBot,
   getBotJids,
   ORBIT_TRIGGER_RE,
+  classifyGroupInvocation,
+  buildRecentContext,
 };

@@ -33,8 +33,30 @@ console.error = (...args) => {
 };
 
 const { startBot } = require('./src/bot');
+const { gracefulShutdown } = require('./src/shutdown');
 
-startBot().catch((err) => {
-  console.error('Falha ao iniciar OrbitBot:', err);
-  process.exit(1);
-});
+let _booted = false;
+
+startBot()
+  .then(() => {
+    _booted = true;
+  })
+  .catch((err) => {
+    console.error('Falha ao iniciar OrbitBot:', err);
+    process.exit(1);
+  });
+
+async function onSignal(signal) {
+  if (!_booted) {
+    process.exit(0);
+    return;
+  }
+  try {
+    await gracefulShutdown(signal);
+  } finally {
+    process.exit(0);
+  }
+}
+
+process.on('SIGTERM', () => onSignal('SIGTERM'));
+process.on('SIGINT', () => onSignal('SIGINT'));

@@ -32,6 +32,7 @@ const { handleGroupMessage, isGroupJid } = require('./groups/groupHandler');
 const { isKernelContextResetCommand } = require('./kernelContext');
 const { newTraceId, emitTraceEvent } = require('./traceClient');
 const { setSock } = require('./outbound/session');
+const { setSock: registerShutdownSock, isShuttingDown } = require('./shutdown');
 const AUTH_DIR = path.join(__dirname, '..', 'auth');
 
 aiAdmin.register(commandBus, {
@@ -79,10 +80,16 @@ async function connectWhatsApp() {
     if (connection === 'open') {
       logger.info('Bot conectado ao WhatsApp (Baileys)');
       setSock(sock);
+      registerShutdownSock(sock);
     }
 
     if (connection === 'close') {
       setSock(null);
+      registerShutdownSock(null);
+      if (isShuttingDown()) {
+        logger.info('Conexão fechada durante shutdown — sem reconexão');
+        return;
+      }
       const statusCode = new Boom(lastDisconnect?.error)?.output?.statusCode;
       const loggedOut = statusCode === DisconnectReason.loggedOut;
       logger.error('Conexão encerrada', { statusCode, loggedOut });
@@ -203,7 +210,10 @@ async function connectWhatsApp() {
           continue;
         }
 
-        const resposta = await messageHandler.run(jid, body, { traceId });
+        const resposta = await messageHandler.run(jid, body, {
+          traceId,
+          messageId: msg.key?.id || null,
+        });
         if (!resposta) {
           emitTraceEvent({
             traceId,
@@ -251,6 +261,7 @@ async function connectWhatsApp() {
 }
 
 const { startInternalHttpServer } = require('./outbound/internalHttp');
+const { setInternalServer } = require('./shutdown');
 
 async function startBot() {
   logger.info('Iniciando OrbitBot (Baileys) — MODO TESTE @orbit activo');
@@ -267,7 +278,8 @@ async function startBot() {
     logger.error('ADMIN_NUMBERS ausente — nenhum admin poderá usar comandos /');
   }
 
-  startInternalHttpServer();
+  const server = startInternalHttpServer();
+  setInternalServer(server);
   await connectWhatsApp();
   logger.info('Bot pronto para mensagens 1:1 e grupos (@orbit / menção)');
 }

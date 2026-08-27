@@ -50,18 +50,50 @@ function normalizeKernelAnswer(answer) {
 async function handleMessage(_historico, userMessage, sessionRef = null) {
   const { userId, channelId, resetHint } = resolveChannelContext(sessionRef);
   const parsed = parseKernelResetCommand(userMessage);
-  // resetHint: grupo já interpretou /reset|/nova na pergunta (não no buffer)
   const resetContext = resetHint || parsed.resetContext;
-  const text = resetHint
-    ? String(userMessage || '').trim() || 'olá'
-    : parsed.text;
 
-  if (!text) {
+  const invocation =
+    sessionRef && typeof sessionRef === 'object' ? sessionRef.invocation : null;
+  const isContextualInvocation =
+    invocation?.type === 'contextual_invocation' && !parsed.resetContext;
+
+  let text;
+  if (resetHint) {
+    text = String(userMessage || '').trim() || 'olá';
+  } else if (isContextualInvocation) {
+    text = '';
+  } else {
+    text = parsed.text;
+  }
+
+  if (!text && !isContextualInvocation) {
     throw new Error('Mensagem vazia após parse');
   }
 
   const traceId =
     (sessionRef && typeof sessionRef === 'object' && sessionRef.traceId) || null;
+
+  const metadata = {};
+  if (invocation) {
+    metadata.invocation = {
+      type: invocation.type,
+      explicit_text: Boolean(invocation.explicit_text),
+    };
+  }
+  if (sessionRef?.senderName) {
+    metadata.sender_name = String(sessionRef.senderName);
+  }
+  if (Array.isArray(sessionRef?.recentContext) && sessionRef.recentContext.length) {
+    metadata.recent_context = sessionRef.recentContext.map((m) => {
+      const sender = String(m.sender || 'membro');
+      const text = String(m.text || '');
+      const prefix = m.is_bot ?? m.isBot ? 'OrbitBot' : sender;
+      return `${prefix}: ${text}`;
+    });
+  }
+  if (sessionRef?.quoted) {
+    metadata.quoted_context = String(sessionRef.quoted);
+  }
 
   const baseUrl = kernelProvider.resolveKernelBaseUrl();
 
@@ -84,6 +116,9 @@ async function handleMessage(_historico, userMessage, sessionRef = null) {
       resetContext: reset,
       platform: 'whatsapp',
       traceId,
+      messageId:
+        sessionRef && typeof sessionRef === 'object' ? sessionRef.messageId || null : null,
+      metadata: Object.keys(metadata).length ? metadata : undefined,
     });
 
     logger.api('Kernel OK', {

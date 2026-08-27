@@ -8,7 +8,7 @@ const { emitTraceEvent } = require('../traceClient');
  * Processa mensagem 1:1: mutex por JID → dados → IA → persistência.
  * @param {string} jid
  * @param {string|Buffer|object} rawText
- * @param {{ traceId?: string }} [opts]
+ * @param {{ traceId?: string, messageId?: string }} [opts]
  * @returns {Promise<string>}
  */
 async function run(jid, rawText, opts = {}) {
@@ -39,6 +39,7 @@ async function run(jid, rawText, opts = {}) {
       userId: jid,
       channelId: jid,
       traceId,
+      messageId: opts.messageId || null,
     });
 
     setImmediate(async () => {
