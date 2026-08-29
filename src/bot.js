@@ -31,7 +31,7 @@ const { matchTestTrigger } = require('./testTrigger');
 const { handleGroupMessage, isGroupJid } = require('./groups/groupHandler');
 const { isKernelContextResetCommand } = require('./kernelContext');
 const { newTraceId, emitTraceEvent } = require('./traceClient');
-const { setSock } = require('./outbound/session');
+const { setSock, setMe } = require('./outbound/session');
 const { setSock: registerShutdownSock, isShuttingDown } = require('./shutdown');
 const AUTH_DIR = path.join(__dirname, '..', 'auth');
 
@@ -63,24 +63,56 @@ async function connectWhatsApp() {
     logger: logger.baileys,
     printQRInTerminal: false,
     syncFullHistory: false,
-    markOnlineOnConnect: false,
+    markOnlineOnConnect: true,
     getMessage: async () => undefined,
   });
 
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect, qr } = update;
+    const { connection, lastDisconnect, qr, isOnline, receivedPendingNotifications } = update;
 
     if (qr) {
       logger.info('Escaneie o QR Code no WhatsApp:');
       qrcode.generate(qr, { small: true });
     }
 
+    if (connection === 'connecting' || isOnline != null || receivedPendingNotifications != null) {
+      logger.info('connection.update', {
+        connection: connection || null,
+        isOnline: isOnline ?? null,
+        receivedPendingNotifications: receivedPendingNotifications ?? null,
+      });
+    }
+
     if (connection === 'open') {
-      logger.info('Bot conectado ao WhatsApp (Baileys)');
+      const credsMe = state.creds?.me || null;
+      if (credsMe?.lid && sock.user && !sock.user.lid) {
+        sock.user.lid = credsMe.lid;
+      }
+      if (credsMe?.name && sock.user && !sock.user.name) {
+        sock.user.name = credsMe.name;
+      }
+      setMe(credsMe || sock.user || null);
+      const me = credsMe || sock.user || null;
+      logger.info('Bot conectado ao WhatsApp (Baileys)', {
+        me_id: me?.id || null,
+        me_lid: me?.lid || null,
+        me_name: me?.name || null,
+        registered: Boolean(state.creds?.registered),
+      });
       setSock(sock);
       registerShutdownSock(sock);
+      sock
+        .groupFetchAllParticipating()
+        .then((groups) => {
+          logger.info('Sessão activa — grupos visíveis', {
+            count: Object.keys(groups || {}).length,
+          });
+        })
+        .catch((err) => {
+          logger.error('groupFetchAllParticipating falhou', { error: err.message });
+        });
     }
 
     if (connection === 'close') {

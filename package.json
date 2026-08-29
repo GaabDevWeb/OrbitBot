@@ -4,9 +4,7 @@
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
-    "test": "node --test --test-force-exit test/*.test.js",
-    "export:history": "node tools/whatsapp-history/exporter.js",
-    "check": "node --check app.js && node --check src/bot.js && node --check src/openai.js && node --check src/providers/kernelProvider.js && node --check src/kernelContext.js && node --check src/core/messageHandler.js && node --check src/utils/whatsappFormatter.js && node --check src/outbound/send.js && node --check src/outbound/internalHttp.js && node --check tools/whatsapp-history/exporter.js && node --check database/index.js"
+    "check": "node --check app.js && node --check src/bot.js && node --check src/openai.js && node --check src/providers/kernelProvider.js && node --check src/kernelContext.js && node --check src/core/messageHandler.js && node --check src/utils/whatsappFormatter.js && node --check src/outbound/send.js && node --check src/outbound/internalHttp.js && node --check database/index.js"
   },
   "author": "gaab",
   "description": "Girando em torno de suas necessidades",

@@ -1,9 +1,9 @@
 # Dependências
 node_modules/
-package-lock.json
 
 # Sessão WhatsApp (Baileys)
 auth/
+auth.backup.*/
 tokens/
 *.session
 wppconnect-session/
@@ -31,18 +31,24 @@ Thumbs.db
 *.swp
 *.swo
 
+# Dev / agentes (não operacional)
+test/
+memory/
+tools/
+.agent_history.md
+
 # Arquivos de backup (exceto logs de backup)
 database/backups/*/
 !database/backups/backup_log.json
 
 # Banco SQLite local (não versionar dados reais)
-database/data/*.db
-database/data/*.db-*
+database/data/*
+!database/data/.gitkeep
 
 # Arquivos de cache
 .cache/
 *.cache
 
-# Exports de histórico WhatsApp (ferramenta tools/whatsapp-history)
+# Exports de histórico WhatsApp
 exports/*
-!exports/.gitkeep 
+!exports/.gitkeep

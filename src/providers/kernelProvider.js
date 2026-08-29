@@ -99,7 +99,7 @@ async function postChatOnce({
     throw err;
   }
 
-  return answer;
+  return { answer, metadata: response.data?.metadata || {} };
 }
 
 /**
@@ -116,7 +116,7 @@ async function postChatOnce({
  *   messageId?: string|null,
  *   metadata?: object,
  * }} options
- * @returns {Promise<string>}
+ * @returns {Promise<{ answer: string, metadata: object }>}
  */
 async function chat(options) {
   const {
@@ -197,7 +197,7 @@ async function chat(options) {
           });
         }
 
-        const answer = await postChatOnce({
+        const { answer, metadata } = await postChatOnce({
           url,
           body,
           headers,
@@ -212,10 +212,14 @@ async function chat(options) {
             traceId: tid,
             stage: 'RESPONSE_RECEIVED_FROM_KERNEL',
             baseUrl,
-            data: { answerChars: answer.length, status: 200 },
+            data: {
+              answerChars: answer.length,
+              status: 200,
+              introduction: Boolean(metadata?.introduction),
+            },
           });
         }
-        return answer;
+        return { answer, metadata };
       } catch (err) {
         if (
           err.name === 'CanceledError' ||
@@ -240,8 +244,36 @@ async function chat(options) {
   );
 }
 
+async function confirmIntroduction({ baseUrl, platform = 'whatsapp', channelId, token = null }) {
+  const root = baseUrl || resolveKernelBaseUrl();
+  const url = `${root}/v1/groups/${encodeURIComponent(platform)}/${encodeURIComponent(channelId)}/introduction/confirm`;
+  const headers = {};
+  const bearer = String(token || process.env.KERNEL_API_TOKEN || process.env.ACL_API_BEARER_TOKEN || '').trim();
+  if (bearer) headers.Authorization = `Bearer ${bearer}`;
+  const res = await api.post(url, {}, { headers, validateStatus: () => true });
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(`Kernel confirm introduction HTTP ${res.status}`);
+  }
+  return res.data;
+}
+
+async function abortIntroduction({ baseUrl, platform = 'whatsapp', channelId, token = null }) {
+  const root = baseUrl || resolveKernelBaseUrl();
+  const url = `${root}/v1/groups/${encodeURIComponent(platform)}/${encodeURIComponent(channelId)}/introduction/abort`;
+  const headers = {};
+  const bearer = String(token || process.env.KERNEL_API_TOKEN || process.env.ACL_API_BEARER_TOKEN || '').trim();
+  if (bearer) headers.Authorization = `Bearer ${bearer}`;
+  const res = await api.post(url, {}, { headers, validateStatus: () => true });
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(`Kernel abort introduction HTTP ${res.status}`);
+  }
+  return res.data;
+}
+
 module.exports = {
   chat,
+  confirmIntroduction,
+  abortIntroduction,
   resolveKernelBaseUrl,
   DEFAULT_BASE_URL,
   DEFAULT_TIMEOUT_MS,

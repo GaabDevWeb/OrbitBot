@@ -1,91 +1,74 @@
 # OrbitBot
 
-Assistente pessoal via WhatsApp (1:1) com IA (OpenRouter/DeepSeek) e SQLite.
+Adapter WhatsApp (Baileys) para o KernelBot. Buffer local, dedupe, `@orbit` em grupos, outbound interno e traces.
 
-Stack actual: **Node.js (JavaScript)** · **@whiskeysockets/baileys** · **SQLite** · **pino** · **OpenRouter**
+Kernel (RAG + LLM): repositório irmão `../KernelBot` — branch `true-kernel`.
 
-## Pré-requisitos
+## Requisitos
 
 - Node.js ≥ 18
-- Conta [OpenRouter](https://openrouter.ai)
+- KernelBot a correr (`http://127.0.0.1:8001`)
+- Sessão WhatsApp (QR na primeira execução)
 
-## Instalação
+## Configuração
 
 ```bash
-git clone https://github.com/GaabDevWeb/OrbitBot.git
-cd OrbitBot
-git checkout refactor/wppconnect-to-baileys   # branch da migração Baileys
-npm install
+npm ci
 cp .env.example .env
 ```
 
-Edite `.env`:
+Variáveis mínimas:
 
-```env
-OPENROUTER_API_KEY=sk-or-v1-sua-chave
-ADMIN_NUMBERS=5554999999999
-OPENROUTER_MODELS=["deepseek/deepseek-chat-v3-0324:free","google/gemini-2.0-flash-exp:free"]
-```
+| Variável | Descrição |
+|----------|-----------|
+| `ADMIN_NUMBERS` | Admins (DDI + número, vírgula) |
+| `KERNEL_API_URL` | Base do Kernel (sem `/v1`) |
+| `KERNEL_API_TOKEN` | Bearer (`ACL_API_BEARER_TOKEN` no Kernel) |
+| `ORBIT_INTERNAL_PORT` | HTTP interno outbound (default 8010) |
 
-`ADMIN_NUMBERS`: dígitos com DDI, separados por vírgula (sem `@c.us`).  
-`OPENROUTER_MODELS`: array JSON (ou CSV) de slugs OpenRouter — ordem = prioridade; se um falhar, tenta o próximo.
+Ver `.env.example` e `docs/KERNEL-INTEGRATION.md`.
 
-### Persona (system prompt)
-
-A personalidade do bot é um único ficheiro Markdown:
-
-`prompts/SYSTEM.md`
-
-Edita o ficheiro e, se o bot já estiver a correr, usa `/ai prompt reload` (admin).
-
-## Execução
+## Inicialização
 
 ```bash
+# Terminal 1 — Kernel
+cd ../KernelBot && PYTHONPATH=. .venv/bin/python main.py
+
+# Terminal 2 — Orbit
 npm start
 ```
 
-Na primeira execução, um QR Code aparece no terminal. Escaneie em WhatsApp → Dispositivos conectados.
+Primeira execução: escanear QR no terminal. Sessão em `./auth/` (gitignored).
 
-Sessão Baileys: pasta `./auth/` (gitignored).
+## Health
 
-## Arquitectura (resumo)
+- Orbit: `GET http://127.0.0.1:8010/internal/health` (WhatsApp + probe Kernel)
+- Kernel: `GET http://127.0.0.1:8001/health`
+
+## Estrutura mínima
 
 ```
-WhatsApp → Baileys → grupos (@orbit/menção) | 1:1 (@orbit)
-                         ↓                        ↓
-                   buffer RAM 40            mutex → SQLite
-                         ↓                        ↓
-                    OpenRouter ←────────────── openai.js
-                         ↓
-              markdownToWhatsapp → sendMessage
+app.js              → entrypoint
+src/bot.js          → Baileys + lifecycle
+src/groups/         → buffer, @orbit, invocação contextual
+src/providers/      → kernelProvider (POST /v1/chat)
+src/outbound/       → HTTP interno + envio WhatsApp
+database/           → SQLite local (admin/histórico legado)
+prompts/SYSTEM.md   → persona admin local (Kernel usa prompts próprios)
+auth/               → sessão Baileys (runtime, gitignored)
 ```
 
-- Sem fila MessageQueue, sem PluginSystem, sem dashboard HTTP.
-- **1:1 (modo teste):** só mensagens com prefixo `@orbit` (inclui `fromMe` / `append`).
-- **Grupos:** buffer em memória (40 msgs); IA com `@orbit` ou menção; sem SQLite.
-- Persona: `prompts/SYSTEM.md`. Modelos: `OPENROUTER_MODELS` com fallback.
-- Preferências `/ai` persistem na tabela `config` quando aplicável.
+Detalhe: `docs/runtime-manifest.md`.
 
-## Comandos admin (só `ADMIN_NUMBERS`)
+## Troubleshooting
 
-| Comando | Função |
-|---------|--------|
-| `/ai` | Prompt, stats, cache |
-| `/backup` | Criar/listar/restaurar backups do SQLite |
-| `/historico <id\|numero> [página]` | Consultar histórico |
-| `/reset` / `/reset confirmar` | Apaga clientes+histórico (preserva `config`) |
+| Problema | Acção |
+|----------|-------|
+| QR não aparece | Verificar Node ≥ 18; apagar `auth/` e reiniciar |
+| Kernel 401 | Alinhar `KERNEL_API_TOKEN` com Kernel |
+| Sem resposta em grupo | Mensagem com `@orbit` ou menção configurada |
+| Outbound falha | `ORBIT_INTERNAL_PORT` livre; firewall localhost |
 
-## Scripts
+## Backup
 
-```bash
-npm start    # sobe o bot
-npm test     # testes unitários (node:test)
-npm run check
-```
-
-## Documentação
-
-- `docs/RELATORIO-GERAL.md` — inventário técnico actual (Baileys, grupos, formatter, IA)
-- `docs/WHATSAPP-MARKDOWN-MAPPING.md` — matriz Markdown → WhatsApp
-- `docs/prd/2026-07-26-refactor-baileys.md` — PRD da refatoração
-- `docs/ARCHITECTURE.md` · `docs/DATA-MODEL.md` · `docs/API_SPEC.md`
+Comandos admin via WhatsApp (`/backup`, `/db`). SQLite em `database/data/` (gitignored).

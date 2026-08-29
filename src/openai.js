@@ -35,6 +35,63 @@ function normalizeKernelAnswer(answer) {
   return cleaned;
 }
 
+/** Formata uma citação ISS para WhatsApp. */
+function formatWhatsappSourceEntry(citation) {
+  const title = String(citation?.title || citation?.lesson_title || 'Aula').trim();
+  const url = String(citation?.url || '').trim();
+  const disc = String(citation?.discipline_label || '').trim();
+  const lines = [`• *${title}*`];
+  if (disc) lines.push(`_${disc}_`);
+  if (url) lines.push(url);
+  return lines.join('\n');
+}
+
+/** Rodapé de referências para WhatsApp. */
+function formatWhatsappSourcesBlock(citations) {
+  const items = citations.map(formatWhatsappSourceEntry).join('\n\n');
+  return `📚 *Material de referência*\n\n${items}`;
+}
+
+/** Acrescenta links ISS das fontes RAG quando o LLM não citou explicitamente. */
+function appendIssSourceLinks(answer, metadata) {
+  const text = String(answer || '').trim();
+  if (!text) return text;
+  if (/Material de referência/i.test(text)) return text;
+  if (/📖\s*\*/.test(text) || /gaabdevweb\.github\.io\/ISS/i.test(text)) return text;
+
+  const citations = metadata?.source_citations;
+  if (Array.isArray(citations) && citations.length) {
+    return `${text}\n\n${formatWhatsappSourcesBlock(citations)}`;
+  }
+
+  const links = metadata?.source_links;
+  if (!Array.isArray(links) || !links.length) return text;
+  const fallback = links.map((url) => {
+    const parsed = parseIssLessonUrl(url);
+    const title = parsed?.slug
+      ? parsed.slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+      : 'Aula';
+    return formatWhatsappSourceEntry({ title, url, discipline_label: parsed?.disciplineLabel || '' });
+  });
+  return `${text}\n\n📚 *Material de referência*\n\n${fallback.join('\n\n')}`;
+}
+
+function parseIssLessonUrl(url) {
+  try {
+    const u = new URL(String(url));
+    const disc = (u.searchParams.get('d') || '').trim();
+    const slug = (u.searchParams.get('a') || '').trim();
+    if (!disc || !slug) return null;
+    return {
+      discipline: disc,
+      slug,
+      disciplineLabel: disc.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Gera resposta via Kernel (POST /v1/chat).
  * `historico` é ignorado — SSOT do transcript é o Kernel (grill-me Orbit Q2).
@@ -73,18 +130,18 @@ async function handleMessage(_historico, userMessage, sessionRef = null) {
   const traceId =
     (sessionRef && typeof sessionRef === 'object' && sessionRef.traceId) || null;
 
-  const metadata = {};
+  const requestMetadata = {};
   if (invocation) {
-    metadata.invocation = {
+    requestMetadata.invocation = {
       type: invocation.type,
       explicit_text: Boolean(invocation.explicit_text),
     };
   }
   if (sessionRef?.senderName) {
-    metadata.sender_name = String(sessionRef.senderName);
+    requestMetadata.sender_name = String(sessionRef.senderName);
   }
   if (Array.isArray(sessionRef?.recentContext) && sessionRef.recentContext.length) {
-    metadata.recent_context = sessionRef.recentContext.map((m) => {
+    requestMetadata.recent_context = sessionRef.recentContext.map((m) => {
       const sender = String(m.sender || 'membro');
       const text = String(m.text || '');
       const prefix = m.is_bot ?? m.isBot ? 'OrbitBot' : sender;
@@ -92,7 +149,7 @@ async function handleMessage(_historico, userMessage, sessionRef = null) {
     });
   }
   if (sessionRef?.quoted) {
-    metadata.quoted_context = String(sessionRef.quoted);
+    requestMetadata.quoted_context = String(sessionRef.quoted);
   }
 
   const baseUrl = kernelProvider.resolveKernelBaseUrl();
@@ -108,7 +165,7 @@ async function handleMessage(_historico, userMessage, sessionRef = null) {
       traceId: traceId || undefined,
     });
 
-    const answer = await kernelProvider.chat({
+    const { answer, metadata: responseMetadata } = await kernelProvider.chat({
       baseUrl,
       userId,
       channelId,
@@ -118,7 +175,7 @@ async function handleMessage(_historico, userMessage, sessionRef = null) {
       traceId,
       messageId:
         sessionRef && typeof sessionRef === 'object' ? sessionRef.messageId || null : null,
-      metadata: Object.keys(metadata).length ? metadata : undefined,
+      metadata: Object.keys(requestMetadata).length ? requestMetadata : undefined,
     });
 
     logger.api('Kernel OK', {
@@ -127,13 +184,15 @@ async function handleMessage(_historico, userMessage, sessionRef = null) {
       resetContext: reset,
       chars: String(answer).length,
       traceId: traceId || undefined,
+      introduction: Boolean(responseMetadata?.introduction),
     });
 
-    return answer;
+    return { answer, metadata: responseMetadata || {} };
   }
 
   try {
-    let answer = await callKernel(resetContext);
+    let kernelResult = await callKernel(resetContext);
+    let answer = kernelResult.answer;
     let useful = normalizeKernelAnswer(answer);
 
     // Meta-safety: retry 1x com reset (limpa transcript envenenado no Kernel)
@@ -144,7 +203,8 @@ async function handleMessage(_historico, userMessage, sessionRef = null) {
         preview: String(answer).slice(0, 80),
         traceId: traceId || undefined,
       });
-      answer = await callKernel(true);
+      kernelResult = await callKernel(true);
+      answer = kernelResult.answer;
       useful = normalizeKernelAnswer(answer);
     }
 
@@ -162,7 +222,10 @@ async function handleMessage(_historico, userMessage, sessionRef = null) {
       throw err;
     }
 
-    return useful;
+    return {
+      text: appendIssSourceLinks(useful, kernelResult.metadata),
+      introductionPendingConfirm: Boolean(kernelResult.metadata?.introduction_pending_confirm),
+    };
   } catch (error) {
     if (error.code === 'ETIMEDOUT') {
       logger.error('Kernel timeout', {
@@ -216,4 +279,7 @@ module.exports = {
   clearCache,
   generateCacheKey,
   normalizeKernelAnswer,
+  appendIssSourceLinks,
+  formatWhatsappSourcesBlock,
+  formatWhatsappSourceEntry,
 };

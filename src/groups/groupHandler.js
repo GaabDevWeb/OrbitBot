@@ -1,10 +1,12 @@
 const logger = require('../logger');
 const { userLock } = require('../concurrency');
 const { handleMessage } = require('../openai');
+const kernelProvider = require('../providers/kernelProvider');
 const { digitsOf, extractText, unwrapMessageContent } = require('../whatsappUtils');
 const { markdownToWhatsapp } = require('../utils/whatsappFormatter');
 const { claimMessageKey } = require('../messageDedupe');
 const groupBuffer = require('./groupBuffer');
+const { getMe } = require('../outbound/session');
 const { classifyGroupInvocation, buildRecentContext } = require('./groupInvocation');
 const { parseKernelResetCommand } = require('../kernelContext');
 const { newTraceId, emitTraceEvent } = require('../traceClient');
@@ -43,6 +45,9 @@ function getBotJids(sock) {
   push(sock?.user?.id);
   push(sock?.user?.jid);
   push(sock?.user?.lid);
+  const cachedMe = getMe();
+  push(cachedMe?.id);
+  push(cachedMe?.lid);
   return [...new Set(out.filter(Boolean))];
 }
 
@@ -165,8 +170,8 @@ async function handleGroupMessage(sock, msg, upsertType = 'notify') {
   const rawPeek = extractText(msg).trim();
 
   // Ecos da sessão (respostas do bot): não disparam IA.
-  // MODO TESTE: fromMe + @orbit é permitido (dono a testar no próprio telemóvel).
-  if (fromMe && !hasOrbitTrigger(rawPeek)) {
+  // MODO TESTE: fromMe + @orbit ou menção nativa ao bot é permitido (dono a testar no telemóvel).
+  if (fromMe && !shouldActivateAi(msg, rawPeek, sock)) {
     return true;
   }
 
@@ -297,6 +302,7 @@ async function handleGroupMessage(sock, msg, upsertType = 'notify') {
     });
 
     let resposta;
+    let introductionPendingConfirm = false;
     try {
       resposta = await handleMessage({ messages: [] }, kernelMessage, {
         userId: authorFull,
@@ -309,6 +315,10 @@ async function handleGroupMessage(sock, msg, upsertType = 'notify') {
         recentContext,
         quoted,
       });
+      if (resposta && typeof resposta === 'object') {
+        introductionPendingConfirm = Boolean(resposta.introductionPendingConfirm);
+        resposta = resposta.text;
+      }
     } catch (err) {
       emitTraceEvent({
         traceId,
@@ -335,7 +345,38 @@ async function handleGroupMessage(sock, msg, upsertType = 'notify') {
 
     const waText = markdownToWhatsapp(String(resposta));
     logger.info('Grupo: a enviar resposta', { groupJid, chars: waText.length, traceId });
-    await sock.sendMessage(groupJid, { text: waText });
+    try {
+      await sock.sendMessage(groupJid, { text: waText });
+    } catch (sendErr) {
+      if (introductionPendingConfirm) {
+        try {
+          await kernelProvider.abortIntroduction({
+            platform: 'whatsapp',
+            channelId: groupJid,
+          });
+        } catch (abortErr) {
+          logger.error('Falha ao abortar apresentação pendente', {
+            groupJid,
+            error: abortErr.message,
+          });
+        }
+      }
+      throw sendErr;
+    }
+    if (introductionPendingConfirm) {
+      try {
+        await kernelProvider.confirmIntroduction({
+          platform: 'whatsapp',
+          channelId: groupJid,
+        });
+        logger.info('Grupo: apresentação confirmada', { groupJid, traceId });
+      } catch (confirmErr) {
+        logger.error('Falha ao confirmar apresentação', {
+          groupJid,
+          error: confirmErr.message,
+        });
+      }
+    }
     emitTraceEvent({
       traceId,
       stage: 'MESSAGE_SENT_TO_WHATSAPP',

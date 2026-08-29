@@ -41,12 +41,13 @@ async function run(jid, rawText, opts = {}) {
       traceId,
       messageId: opts.messageId || null,
     });
+    const replyText = typeof resposta === 'string' ? resposta : resposta?.text || '';
 
     setImmediate(async () => {
       try {
         await Promise.allSettled([
           data.appendHistory(cliente.id, 'user', text),
-          data.appendHistory(cliente.id, 'assistant', resposta),
+          data.appendHistory(cliente.id, 'assistant', replyText),
         ]);
       } catch (err) {
         logger.error('Falha ao persistir histórico (assíncrono)', {
@@ -56,7 +57,7 @@ async function run(jid, rawText, opts = {}) {
       }
     });
 
-    return resposta;
+    return replyText;
   });
 }
 
