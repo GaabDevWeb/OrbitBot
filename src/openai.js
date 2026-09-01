@@ -52,28 +52,9 @@ function formatWhatsappSourcesBlock(citations) {
   return `📚 *Material de referência*\n\n${items}`;
 }
 
-/** Acrescenta links ISS das fontes RAG quando o LLM não citou explicitamente. */
-function appendIssSourceLinks(answer, metadata) {
-  const text = String(answer || '').trim();
-  if (!text) return text;
-  if (/Material de referência/i.test(text)) return text;
-  if (/📖\s*\*/.test(text) || /gaabdevweb\.github\.io\/ISS/i.test(text)) return text;
-
-  const citations = metadata?.source_citations;
-  if (Array.isArray(citations) && citations.length) {
-    return `${text}\n\n${formatWhatsappSourcesBlock(citations)}`;
-  }
-
-  const links = metadata?.source_links;
-  if (!Array.isArray(links) || !links.length) return text;
-  const fallback = links.map((url) => {
-    const parsed = parseIssLessonUrl(url);
-    const title = parsed?.slug
-      ? parsed.slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-      : 'Aula';
-    return formatWhatsappSourceEntry({ title, url, discipline_label: parsed?.disciplineLabel || '' });
-  });
-  return `${text}\n\n📚 *Material de referência*\n\n${fallback.join('\n\n')}`;
+/** Respostas WhatsApp não expõem fontes RAG — devolve o texto do Kernel sem append. */
+function appendIssSourceLinks(answer, _metadata) {
+  return String(answer || '').trim();
 }
 
 function parseIssLessonUrl(url) {
