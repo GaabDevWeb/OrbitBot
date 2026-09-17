@@ -11,10 +11,10 @@ const { classifyGroupInvocation, buildRecentContext } = require('./groupInvocati
 const { parseKernelResetCommand } = require('../kernelContext');
 const { newTraceId, emitTraceEvent } = require('../traceClient');
 const {
-  hasOrbitTrigger,
+  hasKernelTrigger,
   normalizeTriggerText,
-  stripOrbitTrigger,
-  ORBIT_TRIGGER_RE,
+  stripKernelTrigger,
+  KERNEL_TRIGGER_RE,
 } = require('../mentionTrigger');
 
 function isGroupJid(jid) {
@@ -103,14 +103,14 @@ function textMentionsBot(text, sock) {
 
 function shouldActivateAi(msg, text, sock) {
   return (
-    hasOrbitTrigger(text) ||
+    hasKernelTrigger(text) ||
     isBotMentioned(msg, sock) ||
     textMentionsBot(text, sock)
   );
 }
 
 function sanitizeQuestion(text) {
-  return stripOrbitTrigger(text)
+  return stripKernelTrigger(text)
     .replace(/@\d{5,}\b/g, ' ')
     .replace(/@\S+/g, ' ')
     .replace(/\s+/g, ' ')
@@ -159,7 +159,7 @@ function resolveBufferText(msg) {
 /**
  * Processa mensagem de grupo.
  * - Sempre acrescenta ao buffer (todas as msgs de membros).
- * - Só chama IA com @orbit ou menção.
+ * - Só chama IA com @kernel ou menção.
  * - Prompt recebe o buffer COMPLETO (não só msgs que marcam o bot).
  */
 async function handleGroupMessage(sock, msg, upsertType = 'notify') {
@@ -170,7 +170,7 @@ async function handleGroupMessage(sock, msg, upsertType = 'notify') {
   const rawPeek = extractText(msg).trim();
 
   // Ecos da sessão (respostas do bot): não disparam IA.
-  // MODO TESTE: fromMe + @orbit ou menção nativa ao bot é permitido (dono a testar no telemóvel).
+  // MODO TESTE: fromMe + @kernel ou menção nativa ao bot é permitido (dono a testar no telemóvel).
   if (fromMe && !shouldActivateAi(msg, rawPeek, sock)) {
     return true;
   }
@@ -205,7 +205,7 @@ async function handleGroupMessage(sock, msg, upsertType = 'notify') {
     bufferSize: groupBuffer.size(groupJid),
     activate,
     mentionedJid: extractMentionedJids(msg),
-    hasOrbitText: hasOrbitTrigger(rawText),
+    hasKernelText: hasKernelTrigger(rawText),
     preview: bufferText.slice(0, 80),
   });
 
@@ -400,11 +400,11 @@ module.exports = {
   shouldActivateAi,
   sanitizeQuestion,
   extractQuotedContext,
-  hasOrbitTrigger,
+  hasKernelTrigger,
   isBotMentioned,
   textMentionsBot,
   getBotJids,
-  ORBIT_TRIGGER_RE,
+  KERNEL_TRIGGER_RE,
   classifyGroupInvocation,
   buildRecentContext,
 };

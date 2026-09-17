@@ -197,7 +197,7 @@ async function handleMessage(_historico, userMessage, sessionRef = null) {
         traceId: traceId || undefined,
       });
       const err = new Error(
-        'Resposta inválida do Kernel (meta safety). Tenta de novo ou @orbit /nova.'
+        'Resposta inválida do Kernel (meta safety). Tenta de novo ou @kernel /nova.'
       );
       err.code = 'KERNEL_META_SAFETY';
       throw err;

@@ -26,9 +26,12 @@ const {
 } = require('./whatsappUtils');
 const { markdownToWhatsapp } = require('./utils/whatsappFormatter');
 const { claimMessageKey } = require('./messageDedupe');
-// MODO TESTE (@orbit) — branch refactor/test-trigger-mode; fácil de remover
-const { matchTestTrigger } = require('./testTrigger');
-const { handleGroupMessage, isGroupJid } = require('./groups/groupHandler');
+const {
+  handleGroupMessage,
+  isGroupJid,
+  shouldActivateAi,
+  sanitizeQuestion,
+} = require('./groups/groupHandler');
 const { isKernelContextResetCommand } = require('./kernelContext');
 const { newTraceId, emitTraceEvent } = require('./traceClient');
 const { setSock, setMe } = require('./outbound/session');
@@ -192,10 +195,8 @@ async function connectWhatsApp() {
         }
 
         const rawBody = extractText(msg).trim();
-        // MODO TESTE 1:1: só processa se começar com @orbit (case-insensitive)
-        const body = matchTestTrigger(rawBody);
-        if (body === null) {
-          logger.info('Ignorada (sem @orbit)', {
+        if (!shouldActivateAi(msg, rawBody, sock)) {
+          logger.info('Ignorada (sem @kernel / menção)', {
             type,
             jid,
             fromMe: Boolean(msg.key?.fromMe),
@@ -203,7 +204,17 @@ async function connectWhatsApp() {
           });
           continue;
         }
-        if (!body) continue;
+        const body = sanitizeQuestion(rawBody);
+        if (!body) {
+          logger.info('1:1: gatilho sem pergunta', {
+            jid,
+            fromMe: Boolean(msg.key?.fromMe),
+          });
+          await sock.sendMessage(jid, {
+            text: 'Manda a pergunta junto com @kernel ou menciona o bot.',
+          });
+          continue;
+        }
 
         if (!claimMessageKey(msg.key)) {
           logger.info('1:1: mensagem duplicada ignorada', { jid, msgId: msg.key?.id });
@@ -223,7 +234,7 @@ async function connectWhatsApp() {
           },
         });
 
-        logger.info('Nova mensagem recebida (modo @orbit)', {
+        logger.info('Nova mensagem recebida (1:1)', {
           type,
           from: jid,
           fromMe: Boolean(msg.key.fromMe),
@@ -278,7 +289,7 @@ async function connectWhatsApp() {
           if (jid && (isPrivateChat(jid) || isGroupJid(jid))) {
             const text =
               err.code === 'KERNEL_META_SAFETY'
-                ? 'Não consegui gerar uma resposta útil agora. Tenta outra vez (ou @orbit /nova).'
+                ? 'Não consegui gerar uma resposta útil agora. Tenta outra vez (ou @kernel /nova).'
                 : 'Estou tendo dificuldades técnicas. Por favor, tente novamente.';
             await sock.sendMessage(jid, { text });
           }
@@ -296,7 +307,7 @@ const { startInternalHttpServer } = require('./outbound/internalHttp');
 const { setInternalServer } = require('./shutdown');
 
 async function startBot() {
-  logger.info('Iniciando OrbitBot (Baileys) — MODO TESTE @orbit activo');
+  logger.info('Iniciando OrbitBot (Baileys) — 1:1 e grupos (@kernel / menção)');
   await aiConfigManager.hydrate();
 
   const kernelUrl = process.env.KERNEL_API_URL || 'http://127.0.0.1:8001';
@@ -313,7 +324,7 @@ async function startBot() {
   const server = startInternalHttpServer();
   setInternalServer(server);
   await connectWhatsApp();
-  logger.info('Bot pronto para mensagens 1:1 e grupos (@orbit / menção)');
+  logger.info('Bot pronto para mensagens 1:1 e grupos (@kernel / menção)');
 }
 
 module.exports = { startBot };
